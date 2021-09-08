@@ -1,4 +1,8 @@
 *.xs linguist-language=Python
+mmwave/.trans_model filter=lfs diff=lfs merge=lfs -text
+mmwave/.lstm_model filter=lfs diff=lfs merge=lfs -text
+mmwave/.conv_model filter=lfs diff=lfs merge=lfs -text
+mmwave/.*_model filter=lfs diff=lfs merge=lfs -text
 *.X_data filter=lfs diff=lfs merge=lfs -text
 *.y_data filter=lfs diff=lfs merge=lfs -text
 *.gif filter=lfs diff=lfs merge=lfs -text

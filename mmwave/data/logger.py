@@ -16,7 +16,7 @@ colorama.init(autoreset=True)
 
 
 class Logger:
-    def __init__(self, GESTURE_TAG):
+    def __init__(self, GESTURE_TAG=None):
         self.logging = False
         self.gesture = GESTURE_TAG
         self.log_file = ''
@@ -118,9 +118,9 @@ class Logger:
         for f in tqdm(os.listdir(save_dir), desc='Files', leave=False):
             df = pd.read_csv(os.path.join(save_dir, f))
             num_of_frames = df.iloc[-1]['frame'] + 1
-            sample = [[] for i in range(num_of_frames)]
+            sample = [[] for _ in range(num_of_frames)]
 
-            for idx, row in df.iterrows():
+            for _, row in df.iterrows():
                 if row['x'] == 'None':
                     obj = [0., 0., 0., 0., 0.]
                 else:
@@ -134,6 +134,28 @@ class Logger:
                 sample[row['frame']].append(obj)
 
             yield sample
+
+    @staticmethod
+    def get_stats(X, y):
+        num_of_classes = len(set(y))
+        print('Number of classes: ' + str(num_of_classes))
+        sample_with_max_num_of_frames = max(X, key=lambda sample: len(sample))
+
+        max_num_of_frames = len(sample_with_max_num_of_frames)
+        print('Maximum number of frames: ' + str(max_num_of_frames))
+
+        sample_with_max_num_of_objs = max(
+            X, key=lambda sample: [len(frame) for frame in sample]
+        )
+
+        frame_with_max_num_of_objs = max(
+            sample_with_max_num_of_objs, key=lambda obj: len(obj)
+        )
+
+        max_num_of_objs = len(frame_with_max_num_of_objs)
+        print('Maximum num of objects: ' + str(max_num_of_objs))
+
+        return max_num_of_frames, max_num_of_objs, num_of_classes
 
     @staticmethod
     def get_all_data(refresh_data=False):

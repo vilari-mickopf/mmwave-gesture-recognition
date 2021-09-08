@@ -15,11 +15,13 @@ from threading import Lock
 import queue
 from queue import Queue
 
+from sklearn.model_selection import train_test_split
+
 from mmwave.communication.connection import mmWave
 from mmwave.communication.parser import Parser
 from mmwave.data.formats import Formats, GESTURE
 from mmwave.data.logger import Logger
-from mmwave.model.nn import NN
+from mmwave.model import ConvModel, LstmModel, TransModel
 from mmwave.utils.completer import Completer
 from mmwave.utils.plotter import Plotter
 from mmwave.utils.handlers import SignalHandler
@@ -58,8 +60,10 @@ class Console(Cmd):
         self.default_config = 'profile'
         self.config = None
 
-        self.logger = Logger(None)
-        self.nn = NN()
+        self.logger = Logger()
+
+        self.model_type = 'lstm'
+        self.__set_model(self.model_type)
 
         # Catching signals
         self.console_queue = Queue()
@@ -80,7 +84,7 @@ class Console(Cmd):
 
         self.logging_queue = Queue()
         self.data_queue = Queue()
-        self.nn_queue = Queue()
+        self.model_queue = Queue()
         self.plotter_queues = plotter_queues
 
         self.__set_prompt()
@@ -112,6 +116,14 @@ class Console(Cmd):
             self.prompt = '%s>>%s ' % (Fore.GREEN, Fore.RESET)
         else:
             self.prompt = '%s[Not connected]%s >> ' % (Fore.RED, Fore.RESET)
+
+    def __set_model(self, type):
+        if type == 'conv':
+            self.model = ConvModel()
+        elif type == 'lstm':
+            self.model = LstmModel()
+        elif type == 'trans':
+            self.model = TransModel()
 
     def preloop(self):
         '''
@@ -353,6 +365,9 @@ class Console(Cmd):
         readline.set_completer(old_completer)
         return rate
 
+    def __model_loaded(self):
+        return self.model.model is not None
+
     def do_connect(self, args=''):
         '''
         Manually connecting to mmWave
@@ -460,6 +475,32 @@ class Console(Cmd):
         offs = len(mline) - len(text)
         return [s[offs:] for s in completions if s.startswith(mline)]
 
+    def do_set_model(self, args=''):
+        if len(args.split()) > 1:
+            error('Too many arguments.')
+            return
+
+        if args not in ['conv', 'lstm', 'trans']:
+            warning('Unknown argument: %s' % args)
+            return
+
+        self.model_type = args
+        self.__set_model(args)
+
+    def complete_set_model(self, text, line, begidx, endidx):
+        completions = ['conv', 'lstm', 'trans']
+
+        mline = line.partition(' ')[2]
+        offs = len(mline) - len(text)
+        return [s[offs:] for s in completions if s.startswith(mline)]
+
+    def do_get_model(self, args=''):
+        if args != '':
+            error('Unknown arguments.')
+            return
+
+        print('Current model type:', self.model_type)
+
     @threaded
     def __listen_thread(self):
         print('%s=== Listening ===' % Fore.CYAN)
@@ -505,23 +546,75 @@ class Console(Cmd):
 
                 with self.predicting_lock:
                     if self.predicting:
-                        self.nn_queue.put(frame)
+                        self.model_queue.put(frame)
 
             time.sleep(0.05)
 
     @threaded
     def __predict_thread(self):
+        collecting = False
+        sequence = []
+        empty_frames = []
+        detected_time = time.time()
+        frame_num = 0
+
+        num_of_data_in_obj = 5
+        num_of_frames = 50
+
         while True:
             with self.predicting_lock:
                 if not self.predicting:
                     break
 
-            frame = self.nn_queue.get()
+            frame = self.model_queue.get()
 
-            nn_ready = self.nn.set_sequence(frame)
-            if nn_ready:
-                self.nn.predict()
-                #  self.nn.predict(debug=True)
+            if not collecting:
+                collecting = True
+                sequence = []
+                detected_time = time.time()
+
+            if (frame is not None and
+                    frame.get('tlvs') is not None and
+                    frame['tlvs'].get(1) is not None):
+                detected_time = time.time()
+                if frame_num == 0:
+                    sequence = []
+
+                for empty_frame in empty_frames:
+                    sequence.append(empty_frame)
+                    empty_frames = []
+
+                objs = []
+                for obj in frame['tlvs'][1]['values']['objs']:
+                    if obj is None or None in obj.values():
+                        continue
+                    objs.append([
+                        obj['x_coord']/65535.,
+                        obj['y_coord']/65535.,
+                        obj['range_idx']/65535.,
+                        obj['peak_value']/65535.,
+                        obj['doppler_idx']/65535.
+                    ])
+                sequence.append(objs)
+                frame_num += 1
+
+                if frame_num >= num_of_frames:
+                    empty_frames = []
+                    collecting = False
+                    frame_num = 0
+                    return True
+
+            elif frame_num != 0:
+                empty_frames.append([[0.]*num_of_data_in_obj])
+                frame_num += 1
+
+            if time.time() - detected_time > 0.5:
+                empty_frames = []
+                collecting = False
+                frame_num = 0
+
+                if len(sequence) > 3:
+                    self.model.predict([sequence])
 
     @threaded
     def __logging_thread(self):
@@ -690,8 +783,8 @@ class Console(Cmd):
                 error('Listener not started.')
                 return
 
-        if not self.nn.weights_loaded:
-            self.nn.load_model()
+        if not self.__model_loaded():
+            self.model.load()
             print()
 
         with self.predicting_lock:
@@ -718,8 +811,8 @@ class Console(Cmd):
             error('Unknown arguments.')
             return
 
-        if not self.nn.weights_loaded:
-            self.nn.load_model()
+        if not self.__model_loaded():
+            self.model.load()
             print()
 
         self.do_send(self.default_config)
@@ -747,11 +840,19 @@ class Console(Cmd):
             return
 
         if args == '':
-            self.nn.train()
+            refresh_data = False
         elif args == 'refresh':
-            self.nn.train(refresh_data=True)
+            refresh_data = True
         else:
             warning('Unknown argument: %s' % args)
+            return
+
+        X, y = Logger.get_all_data(refresh_data=refresh_data)
+        Logger.get_stats(X, y)
+        X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=.3,
+                                                          stratify=y,
+                                                          random_state=12)
+        self.model.train(X_train, y_train, X_val, y_val)
 
     def complete_train(self, text, line, begidx, endidx):
         completions = ['refresh']
@@ -765,7 +866,7 @@ class Console(Cmd):
         Evaluate neural network
 
         Command will first load cached X and y data located in
-        'mmwave/data/.X_data' and 'mmwave/data/.y_data' files. This data will be
+        \'mmwave/data/.X_data\' and \'mmwave/data/.y_data\' files. This data will be
         used for the evaluating process. If you want to read raw .csv files,
         provide \'refresh\' (this will take few minutes).
 
@@ -779,11 +880,35 @@ class Console(Cmd):
             return
 
         if args == '':
-            self.nn.evaluate()
+            refresh_data = False
         elif args == 'refresh':
-            self.nn.evaluate(refresh_data=True)
+            refresh_data = True
         else:
             warning('Unknown argument: %s' % args)
+            return
+
+        X, y = Logger.get_all_data(refresh_data=refresh_data)
+        Logger.get_stats(X, y)
+
+        X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=.3,
+                                                          stratify=y,
+                                                          random_state=12)
+
+        if not self.__model_loaded():
+            self.model.load()
+            print()
+
+        print('Eval validation dataset:')
+        self.model.evaluate(X_val, y_val)
+        print()
+
+        print('Eval train dataset:')
+        self.model.evaluate(X_train, y_train)
+        print()
+
+        print('Eval full dataset:')
+        self.model.evaluate(X, y)
+        print()
 
     def complete_eval(self, text, line, begidx, endidx):
         completions = ['refresh']

@@ -14,6 +14,7 @@ from mmwave.data.logger import Logger
 # Global plot config
 mpl.rcParams['toolbar'] = 'None'
 plt.style.use('seaborn-dark')
+mpl.use('TkAgg')
 
 
 class Plotter:

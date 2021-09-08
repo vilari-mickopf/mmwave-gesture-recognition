@@ -21,9 +21,14 @@ Collecting data from TI AWR1642 via serial port and passing it through transform
 Install [mmwave](./mmwave/) package locally:
 
 ```bash
-git clone https://github.com/f12markovic/mmwave-gesture-recognition.git
+git clone https://github.com/vilari-mickopf/mmwave-gesture-recognition.git
 cd mmwave-gesture-recognition
 pip3 install -e ./
+```
+
+Make sure that tk is installed (it is used as a backend for matplotlib)
+```bash
+sudo pacman -S tk
 ```
 
 ## Serial permissions
