@@ -23,6 +23,7 @@ Install [mmwave](./mmwave/) package locally:
 ```bash
 git clone https://github.com/vilari-mickopf/mmwave-gesture-recognition.git
 cd mmwave-gesture-recognition
+git lfs pull
 pip3 install -e ./
 ```
 
