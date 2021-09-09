@@ -97,9 +97,9 @@ class Model:
                            optimizer='adam',
                            metrics=['accuracy'])
 
-        self.model.fit(X_train, y_train, epochs=10000,
+        self.model.fit(X_train, y_train, epochs=1000,
                        validation_data=(X_val, y_val),
-                       callbacks=[callbacks.EarlyStopping(patience=1000,
+                       callbacks=[callbacks.EarlyStopping(patience=100,
                                                           restore_best_weights=True),
                                   callbacks.ModelCheckpoint(self.model_file,
                                                             verbose=True,
