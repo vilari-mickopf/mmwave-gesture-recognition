@@ -1,6 +1,6 @@
 # Basic Gesture Recognition Using mmWave Sensor - TI AWR1642
 
-Collecting data from TI AWR1642 via serial port and passing it through transformer neural network for recognizing one of nine following gestures:
+Collecting data from TI AWR1642 via serial port and passing it through convolutional,lstm or transformer neural network for recognizing one of nine following gestures:
 
 - Swipe Up
 - Swipe Down
@@ -28,8 +28,14 @@ pip3 install -e ./
 ```
 
 Make sure that tk is installed (it is used as a backend for matplotlib)
+- Arch:
 ```bash
 sudo pacman -S tk
+```
+
+- Ubuntu:
+```bash
+sudo apt install python-tk
 ```
 
 ## Serial permissions
@@ -124,6 +130,16 @@ or
 python3 console.py
 >> train refresh
 ```
+
+### Selecting model
+By default, lstm model is used. Other models can be selected using _set_model_ option.
+```bash
+python3 console.py
+>> set_model conv
+>> set_model lstm
+>> set_model trans
+```
+[Known issue](https://github.com/tensorflow/tensorflow/issues/40171): Tensorflow 2 introduced memory leak on repeatedly loading/unloading of the models, which can cause crashes due to not having enough memory to initialize new model.
 
 ### Help
 
