@@ -66,7 +66,7 @@ the version 02.00.00.04. Bin file is located in [firmware](./firmware/) director
 1. Close SOP0 and SOP2, and reset the power.
 2. Start the console and run flash command:
 ```bash
-python3 console.py
+python console.py
 >> flash xwr16xx_mmw_demo.bin
 ```
 3. Remove SOP0 and reset the power again.
@@ -81,7 +81,7 @@ If the board is connected, the prompt will be green, otherwise, it will be red.
 After connecting, simple _start_ command will start listener, parser, plotter and prediction.
 
 ```bash
-python3 console.py
+python console.py
 >> start
 ```
 
@@ -93,7 +93,7 @@ Use _Ctrl-C_ to stop this command.
 The console can be used for easy data collection. Use _log_ command to save gesture samples in .csv files in [mmwave/data/](./mmwave/data/) directory. If nothing is captured for more than a half a second, the command will automatically stop. _redraw_/_remove_ commands will redraw/remove the last captured sample.
 
 ```bash
-python3 console.py
+python console.py
 >> listen
 >> plot
 >> log up
@@ -109,21 +109,21 @@ python3 console.py
 Console can be used for the training process. [X](./mmwave/data/.X_data) and [y](./mmwave/data/.y_data) data is cached in pickle files located in [mmwave/data/](./mmwave/data/) directory. If new data is captured, _refresh_ argument should be passed (this option will take few minutes to execute).
 
 ```bash
-python3 console.py
+python console.py
 >> train
 ```
 
 or
 
 ```bash
-python3 console.py
+python console.py
 >> train refresh
 ```
 
 ### Selecting model
 By default, lstm model is used. Other models can be selected using _set_model_ option.
 ```bash
-python3 console.py
+python console.py
 >> set_model conv
 >> set_model lstm
 >> set_model trans
@@ -135,7 +135,7 @@ python3 console.py
 Use help command to list all available commands and get documentation on them.
 
 ```bash
-python3 console.py
+python console.py
 >> help
 >> help flash
 >> help listen
