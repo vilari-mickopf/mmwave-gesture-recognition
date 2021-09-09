@@ -8,6 +8,7 @@ import numpy as np
 #  Disable tensorflow logs
 import logging
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 
 import tensorflow as tf
 from tensorflow.keras import utils
