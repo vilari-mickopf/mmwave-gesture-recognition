@@ -142,7 +142,7 @@ class Model:
             print('%s------------------------------\n' % Fore.CYAN)
 
         if best_value[0] >= .9:
-            print('%sGesture recognized:' % Fore.GREEN)
+            print('%sGesture recognized: ' % Fore.GREEN, end='')
             print(Fore.BLUE + GESTURE.to_str(best_guess[0]))
             print('%s==============================\n' % Fore.CYAN)
 
