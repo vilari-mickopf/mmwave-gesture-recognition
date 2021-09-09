@@ -6,6 +6,7 @@ import os
 import readline
 import binascii
 import serial
+from copy import deepcopy
 
 import matplotlib.pyplot as plt
 
@@ -546,7 +547,7 @@ class Console(Cmd):
             frame = parser.assemble(data)
 
             if frame is not None:
-                frame = parser.parse(frame, warn=True)
+                frame = parser.parse(deepcopy(frame), warn=True)
                 with self.logging_lock:
                     if self.logging:
                         self.logging_queue.put(frame)
