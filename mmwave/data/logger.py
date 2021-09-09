@@ -16,9 +16,9 @@ colorama.init(autoreset=True)
 
 
 class Logger:
-    def __init__(self, GESTURE_TAG=None):
+    def __init__(self, gesture=None):
         self.logging = False
-        self.gesture = GESTURE_TAG
+        self.gesture = gesture
         self.log_file = ''
         self.detected_time = 0
         self.empty_frames = ''
@@ -36,8 +36,8 @@ class Logger:
             self.log_file = save_dir + current_sample_name
             print('Sample number: ' + str(num))
 
-    def set_gesture(self, GESTURE_TAG):
-        self.gesture = GESTURE_TAG
+    def set_gesture(self, gesture):
+        self.gesture = gesture
 
     def log(self, frame):
         if not self.logging:
@@ -122,7 +122,7 @@ class Logger:
 
             for _, row in df.iterrows():
                 if row['x'] == 'None':
-                    obj = [0., 0., 0., 0., 0.]
+                    obj = 5*[0.]
                 else:
                     obj = [
                         float(row['x'])/65535.,

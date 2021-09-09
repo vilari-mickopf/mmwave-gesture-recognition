@@ -272,14 +272,17 @@ class Console(Cmd):
         self.flasher.flash(filepaths, erase=True)
         print('%sDone.' % Fore.GREEN)
 
+    def __complete_from_list(self, complete_list, text, line):
+        mline = line.partition(' ')[2]
+        offs = len(mline) - len(text)
+        return [s[offs:] for s in complete_list if s.startswith(mline)]
+
     def complete_flash(self, text, line, begidx, endidx):
         completions = []
         for file in glob.glob(self.firmware_dir + '*.bin'):
             completions.append(os.path.basename(file))
 
-        mline = line.partition(' ')[2]
-        offs = len(mline) - len(text)
-        return [s[offs:] for s in completions if s.startswith(mline)]
+        return self.__complete_from_list(completions, text, line)
 
     def do_autoconnect(self, args=''):
         '''
@@ -471,11 +474,20 @@ class Console(Cmd):
         for file in glob.glob(self.config_dir + '*.cfg'):
             completions.append('.'.join(os.path.basename(file).split('.')[:-1]))
 
-        mline = line.partition(' ')[2]
-        offs = len(mline) - len(text)
-        return [s[offs:] for s in completions if s.startswith(mline)]
+        return self.__complete_from_list(completions, text, line)
 
     def do_set_model(self, args=''):
+        '''
+        Set model type used for prediction. Available models are
+        \'conv\' (convolutional 1D), \'lstm\' (long short-term memory) and
+        \'trans\' (transformer). Default is lstm.
+
+        Usage:
+        >> set_model conv
+        >> set_model lstm
+        >> set_model trans
+        '''
+
         if len(args.split()) > 1:
             error('Too many arguments.')
             return
@@ -488,13 +500,16 @@ class Console(Cmd):
         self.__set_model(args)
 
     def complete_set_model(self, text, line, begidx, endidx):
-        completions = ['conv', 'lstm', 'trans']
-
-        mline = line.partition(' ')[2]
-        offs = len(mline) - len(text)
-        return [s[offs:] for s in completions if s.startswith(mline)]
+        return self.__complete_from_list(['conv', 'lstm', 'trans'], text, line)
 
     def do_get_model(self, args=''):
+        '''
+        Get current model type.
+
+        Usage:
+        >> get_model
+        '''
+
         if args != '':
             error('Unknown arguments.')
             return
@@ -706,11 +721,7 @@ class Console(Cmd):
             warning('Unknown option: %s. Skipped.' % opt)
 
     def complete_stop(self, text, line, begidx, endidx):
-        completions = ['mmwave', 'listen', 'plot']
-
-        mline = line.partition(' ')[2]
-        offs = len(mline) - len(text)
-        return [s[offs:] for s in completions if s.startswith(mline)]
+        return self.__complete_from_list(['mmwave', 'listen', 'plot'], text, line)
 
     def do_print(self, args=''):
         '''
@@ -752,11 +763,6 @@ class Console(Cmd):
         if args != '':
             error('Unknown arguments.')
             return
-
-        with self.listening_lock:
-            if not self.listening:
-                error('Listener not started.')
-                return
 
         self.plotter_queues['cli'].put('init')
 
@@ -855,11 +861,7 @@ class Console(Cmd):
         self.model.train(X_train, y_train, X_val, y_val)
 
     def complete_train(self, text, line, begidx, endidx):
-        completions = ['refresh']
-
-        mline = line.partition(' ')[2]
-        offs = len(mline) - len(text)
-        return [s[offs:] for s in completions if s.startswith(mline)]
+        return self.__complete_from_list(['refresh'], text, line)
 
     def do_eval(self, args=''):
         '''
@@ -911,11 +913,7 @@ class Console(Cmd):
         print()
 
     def complete_eval(self, text, line, begidx, endidx):
-        completions = ['refresh']
-
-        mline = line.partition(' ')[2]
-        offs = len(mline) - len(text)
-        return [s[offs:] for s in completions if s.startswith(mline)]
+        return self.__complete_from_list(['refresh'], text, line)
 
     def do_log(self, args=''):
         '''
@@ -944,29 +942,11 @@ class Console(Cmd):
                 error('Listener not started.')
                 return
 
-        if args == 'up':
-            gesture = GESTURE.SWIPE_UP
-        elif args == 'down':
-            gesture = GESTURE.SWIPE_DOWN
-        elif args == 'right':
-            gesture = GESTURE.SWIPE_RIGHT
-        elif args == 'left':
-            gesture = GESTURE.SWIPE_LEFT
-        elif args == 'cw':
-            gesture = GESTURE.SPIN_CW
-        elif args == 'ccw':
-            gesture = GESTURE.SPIN_CCW
-        elif args == 'z':
-            gesture = GESTURE.LETTER_Z
-        elif args == 'x':
-            gesture = GESTURE.LETTER_X
-        elif args == 's':
-            gesture = GESTURE.LETTER_S
-        else:
+        if GESTURE.from_str(args) is None:
             warning('Unknown argument: %s' % args)
             return
 
-        self.logger.set_gesture(gesture)
+        self.logger.set_gesture(args)
 
         with self.logging_lock:
             self.logging = True
@@ -976,12 +956,12 @@ class Console(Cmd):
         with self.logging_lock:
             self.logging = False
 
-    def complete_log(self, text, line, begidx, endidx):
-        completions = ['up', 'down', 'left', 'right', 'cw', 'ccw', 's', 'x', 'z']
+    def __complete_gestures(self, text, line):
+        return self.__complete_from_list(['up', 'down', 'left', 'right',
+                                   'cw', 'ccw', 's', 'x', 'z'], text, line)
 
-        mline = line.partition(' ')[2]
-        offs = len(mline) - len(text)
-        return [s[offs:] for s in completions if s.startswith(mline)]
+    def complete_log(self, text, line, begidx, endidx):
+        return self.__complete_gestures(text, line)
 
     def do_remove(self, args=''):
         '''
@@ -1004,37 +984,15 @@ class Console(Cmd):
             error('Unknown arguments.')
             return
 
-        if args == 'up':
-            gesture = GESTURE.SWIPE_UP
-        elif args == 'down':
-            gesture = GESTURE.SWIPE_DOWN
-        elif args == 'right':
-            gesture = GESTURE.SWIPE_RIGHT
-        elif args == 'left':
-            gesture = GESTURE.SWIPE_LEFT
-        elif args == 'cw':
-            gesture = GESTURE.SPIN_CW
-        elif args == 'ccw':
-            gesture = GESTURE.SPIN_CCW
-        elif args == 'z':
-            gesture = GESTURE.LETTER_Z
-        elif args == 'x':
-            gesture = GESTURE.LETTER_X
-        elif args == 's':
-            gesture = GESTURE.LETTER_S
-        else:
+        if GESTURE.from_str(args) is None:
             warning('Unknown argument: %s' % args)
             return
 
-        self.logger.set_gesture(gesture)
+        self.logger.set_gesture(args)
         self.logger.discard_last_sample()
 
     def complete_remove(self, text, line, begidx, endidx):
-        completions = ['up', 'down', 'left', 'right', 'cw', 'ccw', 's', 'x', 'z']
-
-        mline = line.partition(' ')[2]
-        offs = len(mline) - len(text)
-        return [s[offs:] for s in completions if s.startswith(mline)]
+        return self.__complete_gestures(text, line)
 
     def do_redraw(self, args=''):
         '''
@@ -1057,47 +1015,20 @@ class Console(Cmd):
             error('Unknown arguments.')
             return
 
-        with self.listening_lock:
-            if not self.listening:
-                error('Listener not started.')
-                return
-
         with self.plotting_lock:
             if not self.plotting:
                 error('Plotter not started.')
                 return
 
-        if args == 'up':
-            gesture = GESTURE.SWIPE_UP
-        elif args == 'down':
-            gesture = GESTURE.SWIPE_DOWN
-        elif args == 'right':
-            gesture = GESTURE.SWIPE_RIGHT
-        elif args == 'left':
-            gesture = GESTURE.SWIPE_LEFT
-        elif args == 'cw':
-            gesture = GESTURE.SPIN_CW
-        elif args == 'ccw':
-            gesture = GESTURE.SPIN_CCW
-        elif args == 'z':
-            gesture = GESTURE.LETTER_Z
-        elif args == 'x':
-            gesture = GESTURE.LETTER_X
-        elif args == 's':
-            gesture = GESTURE.LETTER_S
-        else:
+        if GESTURE.from_str(args) is None:
             warning('Unknown argument: %s' % args)
             return
 
         self.plotter_queues['cli'].put('redraw')
-        self.plotter_queues['cli'].put(gesture)
+        self.plotter_queues['cli'].put(args)
 
     def complete_redraw(self, text, line, begidx, endidx):
-        completions = ['up', 'down', 'left', 'right', 'cw', 'ccw', 's', 'x', 'z']
-
-        mline = line.partition(' ')[2]
-        offs = len(mline) - len(text)
-        return [s[offs:] for s in completions if s.startswith(mline)]
+        return self.__complete_gestures(text, line)
 
 
 @threaded

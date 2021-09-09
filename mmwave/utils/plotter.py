@@ -14,7 +14,6 @@ from mmwave.data.logger import Logger
 # Global plot config
 mpl.rcParams['toolbar'] = 'None'
 plt.style.use('seaborn-dark')
-mpl.use('TkAgg')
 
 
 class Plotter:
@@ -65,7 +64,6 @@ class Plotter:
         self.draw_cid = canvas.mpl_connect('draw_event', self.__grab_background)
         self.background = self.fig.canvas.copy_from_bbox(self.fig.bbox)
         self.sc.set_visible(True)
-        self.__blit()
 
     def __fig_close(self, event=None):
         self.queue.put('closed')

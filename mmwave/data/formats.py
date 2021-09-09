@@ -267,68 +267,45 @@ class Formats:
 
 
 class GESTURE:
-    SWIPE_UP = 0
-    SWIPE_DOWN = 1
-    SWIPE_LEFT = 2
-    SWIPE_RIGHT = 3
-    SPIN_CW = 4
-    SPIN_CCW = 5
-    LETTER_Z = 6
-    LETTER_S = 7
-    LETTER_X = 8
+    UP = 0
+    DOWN = 1
+    LEFT = 2
+    RIGHT = 3
+    CW = 4
+    CCW = 5
+    Z = 6
+    S = 7
+    X = 8
 
     @staticmethod
-    def to_str(GESTURE_TAG):
-        if GESTURE_TAG == GESTURE.SWIPE_UP:
-            return 'Swipe Up'
-        elif GESTURE_TAG == GESTURE.SWIPE_DOWN:
-            return 'Swipe Down'
-        elif GESTURE_TAG == GESTURE.SWIPE_LEFT:
-            return 'Swipe Left'
-        elif GESTURE_TAG == GESTURE.SWIPE_RIGHT:
-            return 'Swipe Right'
-        elif GESTURE_TAG == GESTURE.SPIN_CW:
-            return 'Spin CW'
-        elif GESTURE_TAG == GESTURE.SPIN_CCW:
-            return 'Spin CCW'
-        elif GESTURE_TAG == GESTURE.LETTER_Z:
-            return 'Letter Z'
-        elif GESTURE_TAG == GESTURE.LETTER_S:
-            return 'Letter S'
-        elif GESTURE_TAG == GESTURE.LETTER_X:
-            return 'Letter X'
-        else:
-            return None
+    def __is_gesture(attr):
+        return (not attr.startswith("__") and isinstance(getattr(GESTURE, attr), int))
 
     @staticmethod
-    def get_dir(GESTURE_TAG):
-        if GESTURE_TAG == GESTURE.SWIPE_UP:
-            gesture_dir = 'swipe_up'
-        elif GESTURE_TAG == GESTURE.SWIPE_DOWN:
-            gesture_dir = 'swipe_down'
-        elif GESTURE_TAG == GESTURE.SWIPE_LEFT:
-            gesture_dir = 'swipe_left'
-        elif GESTURE_TAG == GESTURE.SWIPE_RIGHT:
-            gesture_dir = 'swipe_right'
-        elif GESTURE_TAG == GESTURE.SPIN_CW:
-            gesture_dir = 'spin_cw'
-        elif GESTURE_TAG == GESTURE.SPIN_CCW:
-            gesture_dir = 'spin_ccw'
-        elif GESTURE_TAG == GESTURE.LETTER_S:
-            gesture_dir = 'letter_s'
-        elif GESTURE_TAG == GESTURE.LETTER_Z:
-            gesture_dir = 'letter_z'
-        elif GESTURE_TAG == GESTURE.LETTER_X:
-            gesture_dir = 'letter_x'
-        else:
-            return None
-        return os.path.join(os.path.dirname(__file__), gesture_dir)
+    def to_str(gesture):
+        for attr in dir(GESTURE):
+            if GESTURE.__is_gesture(attr) and getattr(GESTURE, attr) == gesture:
+                return attr.lower()
+
+    @staticmethod
+    def from_str(str):
+        for attr in dir(GESTURE):
+            if str.upper() == attr and GESTURE.__is_gesture(attr):
+                return getattr(GESTURE, attr)
+
+    @staticmethod
+    def get_dir(gesture):
+        if type(gesture) == str:
+            gesture = GESTURE.from_str(gesture)
+
+        if gesture in GESTURE.get_all_gestures():
+            return os.path.join(os.path.dirname(__file__), GESTURE.to_str(gesture))
 
     @staticmethod
     def get_all_gestures():
-        return [getattr(GESTURE, attr) for attr in dir(GESTURE)
-                    if not attr.startswith("__")
-                        and isinstance(getattr(GESTURE, attr), int)]
+        return sorted([getattr(GESTURE, attr) for attr in dir(GESTURE)
+                        if not attr.startswith("__")
+                            and isinstance(getattr(GESTURE, attr), int)])
 
     @staticmethod
     def num_of_gestures():

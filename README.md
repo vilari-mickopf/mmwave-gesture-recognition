@@ -27,17 +27,6 @@ git lfs pull
 pip3 install -e ./
 ```
 
-Make sure that tk is installed (it is used as a backend for matplotlib)
-- Arch:
-```bash
-sudo pacman -S tk
-```
-
-- Ubuntu:
-```bash
-sudo apt install python-tk
-```
-
 ## Serial permissions
 
 The group name can differ from distribution to distribution.
