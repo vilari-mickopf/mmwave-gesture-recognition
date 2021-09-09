@@ -957,8 +957,10 @@ class Console(Cmd):
             self.logging = False
 
     def __complete_gestures(self, text, line):
-        return self.__complete_from_list(['up', 'down', 'left', 'right',
-                                   'cw', 'ccw', 's', 'x', 'z'], text, line)
+        completions = []
+        for gesture in GESTURE.get_all_gestures():
+            completions.append(GESTURE.to_str(gesture))
+        return self.__complete_from_list(completions, text, line)
 
     def complete_log(self, text, line, begidx, endidx):
         return self.__complete_gestures(text, line)
