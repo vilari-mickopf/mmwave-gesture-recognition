@@ -21,12 +21,14 @@ Collecting data from TI AWR1642 via serial port and passing it through convoluti
 Install [mmwave](./mmwave/) package locally:
 
 ```bash
-git clone https://github.com/vilari-mickopf/mmwave-gesture-recognition.git
+git clone https://gitlab.com/vilari-mickopf/mmwave-gesture-recognition.git
 cd mmwave-gesture-recognition
 git lfs pull
 pip3 install -e ./
 ```
 
+_Note: trans\_model is saved on lfs, because it has 200+mb, but github bandiwth is way too small so the file is now blocked. And additionally, the bandwith is not resetting after a month as supposed to, so I would advise just pulling it from [gitlab](https://gitlab.com/vilari-mickopf/mmwave-gesture-recognition) instead (without trans model, you can still use lstm or conv models)._
+ 
 ## Serial permissions
 
 The group name can differ from distribution to distribution.
