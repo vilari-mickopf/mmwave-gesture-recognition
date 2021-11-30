@@ -81,9 +81,7 @@ class Flasher:
         self.connection = connection
 
         # Set connection
-        self.connection.cli_port.send_break(0.1)
-        self.connection.cli_port.flushInput()
-        self.connection.cli_port.flushOutput()
+        self.connection.cli_port.flush()
 
     def send_packet(self, command):
         self.connection.send_cmd(OPCODE.SYNC, size=0)
@@ -95,16 +93,14 @@ class Flasher:
         self.send_packet(command)
         if not self.get_ack(command.timeout):
             error('Command was not successful!')
-            return None
+            return
 
         if get_status:
-            response = self.send_packet(CMD(OPCODE.GET_STATUS))
+            self.send_packet(CMD(OPCODE.GET_STATUS))
 
         if resp:
             response = self.get_response()
             return response
-        else:
-            return True
 
     def get_response(self):
         header = self.connection.get_cmd(3)
@@ -118,7 +114,7 @@ class Flasher:
         calculated_checksum = sum(payload) & 0xff
         if (calculated_checksum != checksum):
             error('Checksum error on received packet.')
-            return None
+            return
 
         return payload
 
@@ -132,8 +128,7 @@ class Flasher:
         self.connection.get_cmd(1) # 0x00
         response = self.connection.get_cmd(1)
 
-        while (not ((response == OPCODE.ACK) or
-                    (response == OPCODE.NACK))):
+        while response not in [OPCODE.ACK, OPCODE.NACK]:
             if self.start_time == 0:
                 self.start_time = time.time()
 
@@ -146,9 +141,9 @@ class Flasher:
 
         self.start_time = 0
 
-        if (response == OPCODE.ACK):
+        if response == OPCODE.ACK:
             return True
-        elif (response == OPCODE.ACK):
+        elif response == OPCODE.ACK:
             error('Received NACK')
             return False
         else:
@@ -169,14 +164,13 @@ class Flasher:
         if erase:
             print('Formating flash...', end='')
             self.erase()
-            print('%sDone.' % Fore.GREEN)
+            print(f'{Fore.GREEN}Done.')
 
         for file in files:
             file_size = os.path.getsize(file)
-            print('Writing %s [%d bytes]' %
-                    (list(Flasher.FILES)[file_id], file_size))
+            print(f'Writing {list(Flasher.FILES)[file_id]} [{file_size} bytes]')
 
-            if (file_size < 0) and (file_size > Flasher.MAX_FILE_SIZE):
+            if file_size < 0 and file_size > Flasher.MAX_FILE_SIZE:
                 error('Invalid file size')
                 return False
 

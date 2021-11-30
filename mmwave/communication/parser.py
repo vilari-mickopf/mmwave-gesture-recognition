@@ -40,7 +40,7 @@ class Parser:
 
             self.sync_time = time.time()
             if self.sync is False:
-                print('%sSync received!\n' % Fore.GREEN)
+                print(f'{Fore.GREEN}Sync received!\n')
                 self.sync = True
                 return None
             return frame
@@ -48,11 +48,11 @@ class Parser:
         elif self.sync is False:
             if self.sync_time == 0:
                 self.sync_time = time.time()
-                print('%sWaiting for sync...' % Fore.YELLOW)
+                print(f'{Fore.YELLOW}Waiting for sync...')
 
             # Capture long sync time
             if time.time() - self.sync_time > self.sync_timeout:
-                print('%sNo sync received.' % Fore.RED)
+                print(f'{Fore.RED}No sync received.')
                 print('Please check your board.\n')
                 self.sync_time = 0
 
@@ -63,7 +63,7 @@ class Parser:
             # Capture long no data time
             if data == b'':
                 if time.time() - self.sync_time > self.sync_timeout:
-                    print('%sNot receiving data. Resyncing...' % Fore.RED)
+                    print(f'{Fore.RED}Not receiving data. Resyncing...')
                     self.sync_time = 0
                     self.sync = False
 
@@ -136,22 +136,22 @@ class Parser:
     def __header_frame_num_check(self, header, echo=False):
         if self.frame_num != 0 and self.frame_num + 1 != header['frame_num']:
             if echo:
-                print('%sWARNING: Missed %d frames.' %
-                        (Fore.YELLOW, header['frame_num'] - self.frame_num - 1))
+                num_of_missed_frames = header['frame_num'] - self.frame_num - 1
+                print(f'{Fore.YELLOW}WARNING: Missed {num_of_missed_frames} frames.')
         self.frame_num = header['frame_num']
 
     def __len_check(self, received, expected, echo=False):
         if received < expected:
             if echo:
-                print('%sERROR: Corrupted frame.' % (Fore.RED))
+                print(f'{Fore.RED}ERROR: Corrupted frame.')
             return False
         return True
 
     def __tlv_type_check(self, tlv_type, echo=False):
         if not self.formats.tlvs.get(tlv_type):
             if echo:
-                print('%sWARNING: TLV format not supported for type \'%d\'!' %
-                        (Fore.YELLOW, tlv_type), 'Skipping.')
+                print(f'{Fore.YELLOW}WARNING:',
+                      f'TLV format not supported for type \'{tlv_type}\'! Skipping.')
                 print('Please check your format configuration.')
             return False
         return True
@@ -159,8 +159,8 @@ class Parser:
     def __tlv_len_check(self, tlv_type, tlv_len, expected_len, echo=False):
         if tlv_len != expected_len:
             if echo:
-                print('%sERROR: TLV type \'%d\'' % (Fore.YELLOW, tlv_type),
-                      '%sformat is not matched with received data!' % Fore.YELLOW)
+                print(f'{Fore.YELLOW}ERROR: TLV type \'{tlv_type}\'',
+                      f'{Fore.YELLOW}format is not matched with received data!')
                 print('Please check your format configuration.')
             return False
         return True
@@ -168,7 +168,7 @@ class Parser:
     @staticmethod
     def pprint(frame):
         if frame is None:
-            print('%sFrame: %sNone' % (Fore.MAGENTA, Fore.RED))
+            print(f'{Fore.MAGENTA}Frame: {Fore.RED}None')
             return
 
         print(Fore.CYAN + '='*85)
@@ -185,7 +185,7 @@ class Parser:
             if isinstance(value, dict):
                 print(indentation, end='')
                 color = Parser.__pprint_get_color(Parser.__pprint_struct.num - 1)
-                print(color + str(key) + ':')
+                print(f'{color}{key}:')
 
                 indentation = indentation + '|   '
                 Parser.__pprint_struct.num += 1
@@ -198,7 +198,7 @@ class Parser:
             elif isinstance(value, list):
                 print(indentation, end='')
                 color = Parser.__pprint_get_color(Parser.__pprint_struct.num - 1)
-                print(color + str(key) + ':')
+                print(f'{color}{key}:')
 
                 indentation = indentation + '|   '
                 for obj in value:
@@ -212,7 +212,7 @@ class Parser:
                 if isinstance(value, tuple):
                     print(indentation, end='')
                     color = Parser.__pprint_get_color(Parser.__pprint_struct.num - 1)
-                    print(color + key + ':')
+                    print(f'{color}{key}:')
                     indentation = indentation + '|   '
 
                     with pd.option_context('display.max_rows', 10,
@@ -227,13 +227,13 @@ class Parser:
                                 color = ''
                                 if word_idx == 0 or line_idx == 0:
                                     color = Fore.YELLOW
-                                print(color + word, end=' ')
+                                print(f'{color}{word}', end=' ')
                             print()
                     indentation = indentation[:-4]
                 else:
                     print(indentation, end='')
                     color = Parser.__pprint_get_color(Parser.__pprint_struct.num - 1)
-                    print(color + key + ':', value)
+                    print(f'{color}{key}: {value}')
 
     @staticmethod
     def __pprint_get_color(num_of_identations):

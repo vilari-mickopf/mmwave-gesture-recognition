@@ -18,7 +18,7 @@ from queue import Queue
 
 from sklearn.model_selection import train_test_split
 
-from mmwave.communication.connection import mmWave
+from mmwave.communication.connection import Connection, mmWave
 from mmwave.communication.parser import Parser
 from mmwave.data.formats import Formats, GESTURE
 from mmwave.data.logger import Logger
@@ -50,9 +50,8 @@ class Console(Cmd):
         self.firmware_dir = 'firmware/'
         self.flasher = None
 
-        self.mmwave = None
         self.__mmwave_init()
-        if self.mmwave is None or self.mmwave.connected is False:
+        if self.mmwave is None or self.mmwave.connected() is False:
             print('Try connecting manually. Type \'help connect\' for more info.\n')
 
         # Configuration
@@ -89,34 +88,46 @@ class Console(Cmd):
         self.plotter_queues = plotter_queues
 
         self.__set_prompt()
-        print('%sInit done.\n' % Fore.GREEN)
-        print('%s--- mmWave console ---' % Fore.MAGENTA)
+        print(f'{Fore.GREEN}Init done.\n')
+        print(f'{Fore.MAGENTA}--- mmWave console ---')
         warning('Type \'help\' for more information.')
 
     def __mmwave_init(self):
+        self.mmwave = None
         if self.cli_port is None or self.data_port is None:
             print('Looking for ports...', end='')
             ports = mmWave.find_ports()
-            if ports != []:
-                self.cli_port = ports[0]
-                self.data_port = ports[1]
+
+            if len(ports) < 2:
+                print(f'{Fore.RED}Ports not found!')
+                print(f'{Fore.YELLOW}Auto-detection is only applicable for',
+                      f'{Fore.YELLOW}eval boards with XDS110.')
+                return
+
+            if len(ports) > 2:
+                print(f'{Fore.YELLOW}Multiple ports detected.',
+                      f'{Fore.YELLOW}Selecting ports {ports[0]} and {ports[1]}.')
+
+            self.cli_port = ports[0]
+            self.data_port = ports[1]
 
         self.mmwave = mmWave(self.cli_port, self.data_port,
                              cli_rate=self.default_cli_rate,
                              data_rate=self.default_data_rate)
-        if self.mmwave.connected:
+        self.mmwave.connect()
+        if self.mmwave.connected():
             self.flasher = Flasher(self.mmwave)
 
     def __is_connected(self):
-        if self.mmwave is None or not self.mmwave.connected:
+        if self.mmwave is None or not self.mmwave.connected():
             return False
         return True
 
     def __set_prompt(self):
         if self.__is_connected():
-            self.prompt = '%s>>%s ' % (Fore.GREEN, Fore.RESET)
+            self.prompt = f'{Fore.GREEN}>>{Fore.RESET} '
         else:
-            self.prompt = '%s[Not connected]%s >> ' % (Fore.RED, Fore.RESET)
+            self.prompt = f'{Fore.RED}[Not connected]{Fore.RESET} >> '
 
     def __set_model(self, type):
         if type == 'conv':
@@ -157,7 +168,7 @@ class Console(Cmd):
         try:
             info = self.plotter_queues['info'].get(False)
             if info == 'closed':
-                print('%sPlotter closed.\n' % Fore.YELLOW)
+                print(f'{Fore.YELLOW}Plotter closed.\n')
                 with self.plotting_lock:
                     if self.plotting:
                         self.plotting = False
@@ -235,7 +246,7 @@ class Console(Cmd):
         Usage:
         >> flash xwr16xx_mmw_demo.bin
         '''
-        if len(args.split(' ')) > 4:
+        if len(args.split()) > 4:
             error('Too many arguments.')
             return
 
@@ -244,10 +255,10 @@ class Console(Cmd):
             return
 
         filepaths = []
-        for arg in args.split(' '):
+        for arg in args.split():
             filepath = self.firmware_dir + arg
             if not os.path.isfile(filepath):
-                error('File \'%s\' doesn\'t exist.' % filepath)
+                error(f'File \'{filepath}\' doesn\'t exist.')
                 return
             filepaths.append(filepath)
 
@@ -260,18 +271,18 @@ class Console(Cmd):
         if response is None:
             warning('Check if SOP0 and SOP2 are closed, and reset the power.')
             return
-        print('%sDone.' % Fore.GREEN)
+        print(f'{Fore.GREEN}Done.')
 
         print('Get version...', end='')
         response = self.flasher.send_cmd(CMD(OPCODE.GET_VERSION))
         if response is None:
             return
-        print('%sDone.' % Fore.GREEN)
-        print('%sVersion:' % Fore.BLUE, binascii.hexlify(response))
+        print(f'{Fore.GREEN}Done.')
+        print(f'{Fore.BLUE}Version:', binascii.hexlify(response))
         print()
 
         self.flasher.flash(filepaths, erase=True)
-        print('%sDone.' % Fore.GREEN)
+        print(f'{Fore.GREEN}Done.')
 
     def __complete_from_list(self, complete_list, text, line):
         mline = line.partition(' ')[2]
@@ -326,11 +337,11 @@ class Console(Cmd):
 
         port = None
         while port is None:
-            port = input('%s%s port:%s ' % (Fore.YELLOW, type, Fore.RESET)).strip()
+            port = input(f'{Fore.YELLOW}{type} port:{Fore.RESET} ').strip()
             if port in ['q', 'exit']:
-                break
+                return
             elif port not in ports:
-                error('Port %s is not valid.' % port)
+                error(f'Port {port} is not valid.')
                 warning('Valid ports:')
                 for port in ports:
                     warning('\t' + port)
@@ -344,20 +355,20 @@ class Console(Cmd):
         old_completer = readline.get_completer()
 
         rates = []
-        for rate in mmWave.BAUDRATES:
+        for rate in Connection.BAUDRATES:
             rates.append(str(rate))
 
         compl_rates = Completer(rates)
         readline.set_completer(compl_rates.list_completer)
         rate = None
         while rate is None:
-            rate = input('%s%s rate:%s ' % (Fore.YELLOW, type, Fore.RESET)).strip()
+            rate = input(f'{Fore.YELLOW}{type} rate:{Fore.RESET} ').strip()
             if rate in ['q', 'exit']:
                 break
             elif rate == '':
-                rate = mmWave.get_baudrate(port)
+                rate = Connection.get_baudrate(port)
             elif rate not in rates:
-                error('Rate %s is not valid.' % rate)
+                error(f'Rate {rate} is not valid.')
                 warning('Valid baudrates:')
                 for rate in rates:
                     warning('\t' + rate)
@@ -494,7 +505,7 @@ class Console(Cmd):
             return
 
         if args not in ['conv', 'lstm', 'trans']:
-            warning('Unknown argument: %s' % args)
+            warning(f'Unknown argument: {args}')
             return
 
         self.model_type = args
@@ -519,7 +530,7 @@ class Console(Cmd):
 
     @threaded
     def __listen_thread(self):
-        print('%s=== Listening ===' % Fore.CYAN)
+        print(f'{Fore.CYAN}=== Listening ===')
         while True:
             with self.listening_lock:
                 if not self.listening:
@@ -719,7 +730,7 @@ class Console(Cmd):
             opts.remove('mmwave')
 
         for opt in opts:
-            warning('Unknown option: %s. Skipped.' % opt)
+            warning(f'Unknown option: {opt}. Skipped.')
 
     def complete_stop(self, text, line, begidx, endidx):
         return self.__complete_from_list(['mmwave', 'listen', 'plot'], text, line)
@@ -851,7 +862,7 @@ class Console(Cmd):
         elif args == 'refresh':
             refresh_data = True
         else:
-            warning('Unknown argument: %s' % args)
+            warning(f'Unknown argument: {args}')
             return
 
         X, y = Logger.get_all_data(refresh_data=refresh_data)
@@ -869,9 +880,9 @@ class Console(Cmd):
         Evaluate neural network
 
         Command will first load cached X and y data located in
-        \'mmwave/data/.X_data\' and \'mmwave/data/.y_data\' files. This data will be
-        used for the evaluating process. If you want to read raw .csv files,
-        provide \'refresh\' (this will take few minutes).
+        \'mmwave/data/.X_data\' and \'mmwave/data/.y_data\' files. This data
+        will be used for the evaluating process. If you want to read raw .csv
+        files, provide \'refresh\' (this will take few minutes).
 
         Usage:
         >> eval
@@ -887,7 +898,7 @@ class Console(Cmd):
         elif args == 'refresh':
             refresh_data = True
         else:
-            warning('Unknown argument: %s' % args)
+            warning(f'Unknown argument: {args}')
             return
 
         X, y = Logger.get_all_data(refresh_data=refresh_data)
@@ -944,7 +955,7 @@ class Console(Cmd):
                 return
 
         if GESTURE.from_str(args) is None:
-            warning('Unknown argument: %s' % args)
+            warning(f'Unknown argument: {args}')
             return
 
         self.logger.set_gesture(args)
@@ -988,7 +999,7 @@ class Console(Cmd):
             return
 
         if GESTURE.from_str(args) is None:
-            warning('Unknown argument: %s' % args)
+            warning(f'Unknown argument: {args}')
             return
 
         self.logger.set_gesture(args)
@@ -1024,7 +1035,7 @@ class Console(Cmd):
                 return
 
         if GESTURE.from_str(args) is None:
-            warning('Unknown argument: %s' % args)
+            warning(f'Unknown argument: {args}')
             return
 
         self.plotter_queues['cli'].put('redraw')

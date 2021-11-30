@@ -34,7 +34,7 @@ class Logger:
             num = int(last_sample_name.split('_')[1]) + 1
             current_sample_name = '/sample_' + str(num) + '.csv'
             self.log_file = save_dir + current_sample_name
-            print('Sample number: ' + str(num))
+            print(f'Sample number: {num}')
 
     def set_gesture(self, gesture):
         self.gesture = gesture
@@ -138,11 +138,11 @@ class Logger:
     @staticmethod
     def get_stats(X, y):
         num_of_classes = len(set(y))
-        print('Number of classes: ' + str(num_of_classes))
+        print(f'Number of classes: {num_of_classes}')
         sample_with_max_num_of_frames = max(X, key=lambda sample: len(sample))
 
         max_num_of_frames = len(sample_with_max_num_of_frames)
-        print('Maximum number of frames: ' + str(max_num_of_frames))
+        print(f'Maximum number of frames: {max_num_of_frames}')
 
         sample_with_max_num_of_objs = max(
             X, key=lambda sample: [len(frame) for frame in sample]
@@ -153,7 +153,7 @@ class Logger:
         )
 
         max_num_of_objs = len(frame_with_max_num_of_objs)
-        print('Maximum num of objects: ' + str(max_num_of_objs))
+        print(f'Maximum num of objects: {max_num_of_objs}')
 
         return max_num_of_frames, max_num_of_objs, num_of_classes
 
@@ -174,5 +174,5 @@ class Logger:
             print('Loading cached data...', end='')
             X = pickle.load(open(X_file, 'rb'))
             y = pickle.load(open(y_file, 'rb'))
-            print('%sDone.' % Fore.GREEN)
+            print(f'{Fore.GREEN}Done.')
         return X, y

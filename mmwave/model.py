@@ -114,21 +114,21 @@ class Model:
 
         print('Loading model...', end='')
         self.model = tf.keras.models.load_model(self.model_file)
-        print('%sDone.' % Fore.GREEN)
+        print(f'{Fore.GREEN}Done.')
 
     def evaluate(self, X, y):
         if self.model is None:
-            print('%sModel not created.' % Fore.Red)
+            print(f'{Fore.RED}Model not created.')
             return
 
         X, y = self.__prep_data(X, y)
         preds = self.model.evaluate(X, y)
-        print('Loss: ' + str(round(preds[0], 4)), end=' ')
-        print('Acc: ' + str(round(preds[1], 4)))
+        print(f'Loss: {round(preds[0], 4)}', end=' ')
+        print(f'Acc: {round(preds[1], 4)}')
 
     def predict(self, X, debug=False):
         if self.model is None:
-            print('%sModel not created.' % Fore.Red)
+            print(f'{Fore.RED}Model not created.')
             return
 
         y_pred = self.model.predict(self.__prep_data(X))
@@ -137,14 +137,13 @@ class Model:
 
         if debug:
             for guess, val in zip(best_guess, best_value):
-                print('%sBest guess: ' % Fore.YELLOW + GESTURE.to_str(guess)
-                       + ': %.2f%%' % val)
-            print('%s------------------------------\n' % Fore.CYAN)
+                print(f'{Fore.YELLOW}Best guess: {GESTURE.to_str(guess)}: {val:.2f}')
+            print(f'{Fore.CYAN}------------------------------\n')
 
         if best_value[0] >= .9:
-            print('%sGesture recognized: ' % Fore.GREEN, end='')
+            print(f'{Fore.GREEN}Gesture recognized: ', end='')
             print(Fore.BLUE + GESTURE.to_str(best_guess[0]))
-            print('%s==============================\n' % Fore.CYAN)
+            print(f'{Fore.CYAN}==============================\n')
 
 
 class ConvModel(Model):

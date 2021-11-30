@@ -12,6 +12,7 @@ from mmwave.data.logger import Logger
 
 
 # Global plot config
+mpl.use('Qt5Agg')
 mpl.rcParams['toolbar'] = 'None'
 plt.style.use('seaborn-dark')
 

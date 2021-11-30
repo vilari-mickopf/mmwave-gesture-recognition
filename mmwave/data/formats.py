@@ -218,7 +218,7 @@ class Formats:
             line = line.strip()
 
             # Skip comment lines and blank lines
-            if re.match('^\s*%|^\s*$', line):
+            if re.match(r'(^\s*%|^\s*$)', line):
                 continue
 
             words = line.split()
@@ -238,7 +238,7 @@ class Formats:
 
         adc_samples = self.config['profileCfg']['numAdcSamples']
 
-        #  RangeBins: number of ADC samples rounded up to the nearest power of 2
+        # RangeBins: number of ADC samples rounded up to the nearest power of 2
         for factor in count():
             res = 2**factor
             if res >= adc_samples:
@@ -248,17 +248,17 @@ class Formats:
                     adc_samples = res//2
                 break
 
-        #  Size: RangeBins
+        # Size: RangeBins
         format[2]['values'] %= str(adc_samples)
-        #  Size: RangeBins
+        # Size: RangeBins
         format[3]['values'] %= str(adc_samples)
 
-        #  Size: RangeBins * num_virtual_antennas
+        # Size: RangeBins * num_virtual_antennas
         num_rx = bin(self.config['channelCfg']['rxAntBitmap']).count('1')
         num_tx = bin(self.config['channelCfg']['txAntBitmap']).count('1')
         format[4]['values'] %= str(adc_samples*num_rx*num_tx)
 
-        #  Size: RangeBins * DopplerBins
+        # Size: RangeBins * DopplerBins
         chirps_per_frame = (self.config['frameCfg']['chirpEndIdx'] -
                             self.config['frameCfg']['chirpStartIdx'])
         format[5]['values'] %= str(adc_samples*chirps_per_frame//num_tx)
