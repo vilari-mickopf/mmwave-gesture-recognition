@@ -1,8 +1,8 @@
 #! /usr/bin/env python
 
 import re
-import sys
 import time
+import platform
 
 import serial
 import serial.tools.list_ports
@@ -176,8 +176,8 @@ class Connection:
         for baudrate in reversed(Connection.BAUDRATES):
             test_conn.baudrate = baudrate
 
-            start_time = time.time()
-            while time.time() - start_time < Connection.TIMEOUT:
+            start_time = time.perf_counter()
+            while time.perf_counter() - start_time < Connection.TIMEOUT:
                 try:
                     test_conn.write(bytes(test_packet, encoding='ascii'))
                 except(serial.SerialTimeoutException, serial.SerialException, OSError):
@@ -286,11 +286,7 @@ class mmWave:
             if pattern in str(port):
                 ports.append(str(port).split()[0])
 
-        if sys.platform.system() == 'Windows':
-            ports.sort(reverse=True)
-        else:
-            ports.sort()
-
+        ports.sort()
         return ports
 
     def send_cmd(self, data, encoding=None, size=None):

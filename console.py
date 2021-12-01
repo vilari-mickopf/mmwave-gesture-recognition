@@ -3,6 +3,7 @@
 import time
 import glob
 import os
+import platform
 import readline
 import binascii
 import serial
@@ -108,6 +109,9 @@ class Console(Cmd):
                 print(f'{Fore.YELLOW}Multiple ports detected.',
                       f'{Fore.YELLOW}Selecting ports {ports[0]} and {ports[1]}.')
 
+            if platform.system() == 'Windows':
+                ports.sort(reverse=True)
+
             self.cli_port = ports[0]
             self.data_port = ports[1]
 
@@ -116,7 +120,7 @@ class Console(Cmd):
                              data_rate=self.default_data_rate)
         self.mmwave.connect()
         if self.mmwave.connected():
-            self.flasher = Flasher(self.mmwave)
+            self.flasher = Flasher(self.mmwave.cli_port)
 
     def __is_connected(self):
         if self.mmwave is None or not self.mmwave.connected():
@@ -256,7 +260,7 @@ class Console(Cmd):
 
         filepaths = []
         for arg in args.split():
-            filepath = self.firmware_dir + arg
+            filepath = os.path.join(self.firmware_dir, arg)
             if not os.path.isfile(filepath):
                 error(f'File \'{filepath}\' doesn\'t exist.')
                 return
@@ -291,7 +295,7 @@ class Console(Cmd):
 
     def complete_flash(self, text, line, begidx, endidx):
         completions = []
-        for file in glob.glob(self.firmware_dir + '*.bin'):
+        for file in glob.glob(os.path.join(self.firmware_dir, '*.bin')):
             completions.append(os.path.basename(file))
 
         return self.__complete_from_list(completions, text, line)
@@ -317,11 +321,9 @@ class Console(Cmd):
             warning('Already connected.')
             print('Reconnecting...')
 
-        ports = mmWave.find_ports()
-        if ports != []:
-            self.cli_port = ports[0]
-            self.data_port = ports[1]
-            self.__mmwave_init()
+        self.cli_port = None
+        self.data_port = None
+        self.__mmwave_init()
 
     def __get_user_port(self, type):
         old_completer = readline.get_completer()
@@ -455,12 +457,8 @@ class Console(Cmd):
             error('Not connected.')
             return
 
-        all_config_files = glob.glob(self.config_dir + '*.cfg')
-        for idx, config in enumerate(all_config_files):
-            all_config_files[idx] = '/'.join(config.split('\\'))
-
-        cfg = self.config_dir + args + '.cfg'
-        if cfg not in all_config_files:
+        cfg = os.path.join(self.config_dir, args + '.cfg')
+        if cfg not in glob.glob(os.path.join(self.config_dir, '*.cfg')):
             print('Unknown profile.')
             return
 
@@ -483,7 +481,7 @@ class Console(Cmd):
 
     def complete_send(self, text, line, begidx, endidx):
         completions = []
-        for file in glob.glob(self.config_dir + '*.cfg'):
+        for file in glob.glob(os.path.join(self.config_dir, '*.cfg')):
             completions.append('.'.join(os.path.basename(file).split('.')[:-1]))
 
         return self.__complete_from_list(completions, text, line)
@@ -526,7 +524,7 @@ class Console(Cmd):
             error('Unknown arguments.')
             return
 
-        print('Current model type:', self.model_type)
+        print(f'Current model type: {self.model_type}')
 
     @threaded
     def __listen_thread(self):
@@ -543,7 +541,7 @@ class Console(Cmd):
                 continue
 
             self.data_queue.put(data)
-            time.sleep(0.05)
+            time.sleep(.05)
 
     @threaded
     def __parse_thread(self):
@@ -575,14 +573,14 @@ class Console(Cmd):
                     if self.predicting:
                         self.model_queue.put(frame)
 
-            time.sleep(0.05)
+            time.sleep(.05)
 
     @threaded
     def __predict_thread(self):
         collecting = False
         sequence = []
         empty_frames = []
-        detected_time = time.time()
+        detected_time = time.perf_counter()
         frame_num = 0
 
         num_of_data_in_obj = 5
@@ -598,12 +596,12 @@ class Console(Cmd):
             if not collecting:
                 collecting = True
                 sequence = []
-                detected_time = time.time()
+                detected_time = time.perf_counter()
 
             if (frame is not None and
                     frame.get('tlvs') is not None and
                     frame['tlvs'].get(1) is not None):
-                detected_time = time.time()
+                detected_time = time.perf_counter()
                 if frame_num == 0:
                     sequence = []
 
@@ -635,7 +633,7 @@ class Console(Cmd):
                 empty_frames.append([[0.]*num_of_data_in_obj])
                 frame_num += 1
 
-            if time.time() - detected_time > 0.5:
+            if time.perf_counter() - detected_time > .5:
                 empty_frames = []
                 collecting = False
                 frame_num = 0
@@ -669,11 +667,7 @@ class Console(Cmd):
 
         if not self.configured:
             warning('mmWave not configured.')
-            warning('Configuring with deafult config...')
-            self.do_send(self.default_config)
-            if not self.configured:
-                error('Configuring failed.')
-                return
+            return
 
         with self.listening_lock:
             if self.listening:
@@ -725,7 +719,8 @@ class Console(Cmd):
             opts.remove('listen')
 
         if 'mmwave' in opts:
-            self.do_send('stop')
+            if self.configured:
+                self.do_send('stop')
             print('mmWave stopped.')
             opts.remove('mmwave')
 
@@ -954,7 +949,7 @@ class Console(Cmd):
                 error('Listener not started.')
                 return
 
-        if GESTURE.from_str(args) is None:
+        if not GESTURE.check(args):
             warning(f'Unknown argument: {args}')
             return
 
@@ -970,8 +965,8 @@ class Console(Cmd):
 
     def __complete_gestures(self, text, line):
         completions = []
-        for gesture in GESTURE.get_all_gestures():
-            completions.append(GESTURE.to_str(gesture))
+        for gesture in GESTURE:
+            completions.append(gesture.name.lower())
         return self.__complete_from_list(completions, text, line)
 
     def complete_log(self, text, line, begidx, endidx):
@@ -998,7 +993,7 @@ class Console(Cmd):
             error('Unknown arguments.')
             return
 
-        if GESTURE.from_str(args) is None:
+        if not GESTURE.check(args):
             warning(f'Unknown argument: {args}')
             return
 
@@ -1034,7 +1029,7 @@ class Console(Cmd):
                 error('Plotter not started.')
                 return
 
-        if GESTURE.from_str(args) is None:
+        if not GESTURE.check(args):
             warning(f'Unknown argument: {args}')
             return
 
@@ -1099,7 +1094,7 @@ def plotting(plotter_queues):
             except queue.Empty:
                 pass
 
-        time.sleep(0.05)
+        time.sleep(.05)
 
 
 if __name__ == '__main__':

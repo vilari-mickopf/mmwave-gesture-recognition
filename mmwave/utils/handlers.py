@@ -20,7 +20,7 @@ class SignalHandler:
         signal(SIGINT, self.__ctrl_c_handler)
 
     def __ctrl_c_handler(self, signal_received, frame):
-        if time.time() - self.detected_time < self.timeout:
+        if time.perf_counter() - self.detected_time < self.timeout:
             self.signal_cnt += 1
             if self.signal_cnt >= self.max_signal_cnt:
                 os._exit(1)
@@ -29,7 +29,7 @@ class SignalHandler:
 
         self.queue.put(signal_received)
 
-        self.detected_time = time.time()
+        self.detected_time = time.perf_counter()
 
         self.keyboard.press(Key.ctrl)
         self.keyboard.press('u')

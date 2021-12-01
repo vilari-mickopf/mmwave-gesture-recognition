@@ -137,12 +137,12 @@ class Model:
 
         if debug:
             for guess, val in zip(best_guess, best_value):
-                print(f'{Fore.YELLOW}Best guess: {GESTURE.to_str(guess)}: {val:.2f}')
+                print(f'{Fore.YELLOW}Best guess: {GESTURE(guess).name.lower()}: {val:.2f}')
             print(f'{Fore.CYAN}------------------------------\n')
 
         if best_value[0] >= .9:
-            print(f'{Fore.GREEN}Gesture recognized: ', end='')
-            print(Fore.BLUE + GESTURE.to_str(best_guess[0]))
+            print(f'{Fore.GREEN}Gesture recognized:',
+                  f'{Fore.BLUE}{GESTURE(best_guess[0]).name.lower()}')
             print(f'{Fore.CYAN}==============================\n')
 
 

@@ -1,5 +1,7 @@
 #! /usr/bin/env python
 
+from enum import Enum, auto
+
 import os
 import re
 from itertools import count
@@ -266,47 +268,23 @@ class Formats:
         return format
 
 
-class GESTURE:
+class GESTURE(Enum):
     UP = 0
-    DOWN = 1
-    LEFT = 2
-    RIGHT = 3
-    CW = 4
-    CCW = 5
-    Z = 6
-    S = 7
-    X = 8
+    DOWN = auto()
+    LEFT = auto()
+    RIGHT = auto()
+    CW = auto()
+    CCW = auto()
+    Z = auto()
+    S = auto()
+    X = auto()
 
     @staticmethod
-    def __is_gesture(attr):
-        return (not attr.startswith("__") and isinstance(getattr(GESTURE, attr), int))
+    def check(name):
+        for gesture in GESTURE:
+            if name.upper() == gesture.name:
+                return True
+        return False
 
-    @staticmethod
-    def to_str(gesture):
-        for attr in dir(GESTURE):
-            if GESTURE.__is_gesture(attr) and getattr(GESTURE, attr) == gesture:
-                return attr.lower()
-
-    @staticmethod
-    def from_str(str):
-        for attr in dir(GESTURE):
-            if str.upper() == attr and GESTURE.__is_gesture(attr):
-                return getattr(GESTURE, attr)
-
-    @staticmethod
-    def get_dir(gesture):
-        if type(gesture) == str:
-            gesture = GESTURE.from_str(gesture)
-
-        if gesture in GESTURE.get_all_gestures():
-            return os.path.join(os.path.dirname(__file__), GESTURE.to_str(gesture))
-
-    @staticmethod
-    def get_all_gestures():
-        return sorted([getattr(GESTURE, attr) for attr in dir(GESTURE)
-                        if not attr.startswith("__")
-                            and isinstance(getattr(GESTURE, attr), int)])
-
-    @staticmethod
-    def num_of_gestures():
-        return len(GESTURE.get_all_gestures)
+    def get_dir(self):
+        return os.path.join(os.path.dirname(__file__), self.name.lower())

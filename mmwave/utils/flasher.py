@@ -47,10 +47,7 @@ class CMD:
 
         self.SIZE = struct.pack('>H', (len(self.CODE)-1+3))
         self.CHECKSUM = struct.pack('B', sum(self.CODE) & 0xFF)
-        if opcode in [OPCODE.PING, OPCODE.GET_VERSION]:
-            self.timeout = 3
-        else:
-            self.timeout = 60
+        self.timeout = 3
 
 
 class Flasher:
@@ -81,13 +78,13 @@ class Flasher:
         self.connection = connection
 
         # Set connection
-        self.connection.cli_port.flush()
+        self.connection.flush()
 
     def send_packet(self, command):
-        self.connection.send_cmd(OPCODE.SYNC, size=0)
-        self.connection.send_cmd(command.SIZE, size=0)
-        self.connection.send_cmd(command.CHECKSUM, size=0)
-        self.connection.send_cmd(command.CODE, size=0)
+        self.connection.write(OPCODE.SYNC, size=0)
+        self.connection.write(command.SIZE, size=0)
+        self.connection.write(command.CHECKSUM, size=0)
+        self.connection.write(command.CODE, size=0)
 
     def send_cmd(self, command, get_status=False, resp=True):
         self.send_packet(command)
@@ -98,18 +95,19 @@ class Flasher:
         if get_status:
             self.send_packet(CMD(OPCODE.GET_STATUS))
 
+        response = ''
         if resp:
             response = self.get_response()
-            return response
+        return response
 
     def get_response(self):
-        header = self.connection.get_cmd(3)
-        packet_size, checksum  = struct.unpack('>HB', header)
+        header = self.connection.read(3)
+        packet_size, checksum = struct.unpack('>HB', header)
         packet_size -= 2 # Compensate for the header
 
-        payload = self.connection.get_cmd(packet_size)
+        payload = self.connection.read(packet_size)
 
-        self.connection.send_cmd(OPCODE.ACK, size=0) # Ack the packet
+        self.connection.write(OPCODE.ACK, size=0) # Ack the packet
 
         calculated_checksum = sum(payload) & 0xff
         if (calculated_checksum != checksum):
@@ -121,29 +119,29 @@ class Flasher:
     def get_ack(self, timeout):
         length = b''
         while length == b'':
-            length = self.connection.get_cmd(2)
+            length = self.connection.read(2)
             time.sleep(0.01)
 
-        self.connection.get_cmd(1) # Checksum
-        self.connection.get_cmd(1) # 0x00
-        response = self.connection.get_cmd(1)
+        self.connection.read(1) # Checksum
+        self.connection.read(1) # 0x00
+        response = self.connection.read(1)
 
         while response not in [OPCODE.ACK, OPCODE.NACK]:
             if self.start_time == 0:
-                self.start_time = time.time()
+                self.start_time = time.perf_counter()
 
-            if time.time() - self.start_time > timeout:
+            if time.perf_counter() - self.start_time > timeout:
                 response = None
                 break
 
-            response = self.connection.get_cmd(1)
+            response = self.connection.read(1)
             time.sleep(0.01)
 
         self.start_time = 0
 
         if response == OPCODE.ACK:
             return True
-        elif response == OPCODE.ACK:
+        elif response == OPCODE.NACK:
             error('Received NACK')
             return False
         else:

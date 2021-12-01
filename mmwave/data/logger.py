@@ -26,15 +26,15 @@ class Logger:
 
     def __set_file(self):
         last_sample = self.get_last_sample(self.gesture)
-        if last_sample[-1] == '/':
-            self.log_file = last_sample + 'sample_1.csv'
-        else:
-            save_dir = '/'.join(last_sample.split('/')[:-1])
-            last_sample_name = (last_sample.split('/')[-1]).split('.')[0]
-            num = int(last_sample_name.split('_')[1]) + 1
-            current_sample_name = '/sample_' + str(num) + '.csv'
-            self.log_file = save_dir + current_sample_name
-            print(f'Sample number: {num}')
+        if last_sample is None:
+            self.log_file = os.path.join(last_sample, 'sample_1.csv')
+            return
+
+        save_dir = os.path.dirname(last_sample)
+        last_sample_name = os.path.splitext(last_sample)[0]
+        num = int(os.path.basename(last_sample_name).split('_')[1]) + 1
+        self.log_file = os.path.join(save_dir, 'sample_' + str(num) + '.csv')
+        print(f'Sample number: {num}')
 
     def set_gesture(self, gesture):
         self.gesture = gesture
@@ -43,13 +43,13 @@ class Logger:
         if not self.logging:
             self.__set_file()
             self.logging = True
-            self.detected_time = time.time()
+            self.detected_time = time.perf_counter()
             print('Saving...')
 
         if (frame is not None and
                 frame.get('tlvs') is not None and
                 frame['tlvs'].get(1) is not None):
-            self.detected_time = time.time()
+            self.detected_time = time.perf_counter()
             with open(self.log_file, 'a') as f:
                 if self.frame_num == 0:
                     f.write('frame,x,y,range_idx,peak_value,doppler_idx,xyz_q_format\n')
@@ -74,7 +74,7 @@ class Logger:
                                    'None, None, None, None, None\n')
             self.frame_num += 1
 
-        if time.time() - self.detected_time > 0.5:
+        if time.perf_counter() - self.detected_time > .5:
             if os.path.isfile(self.log_file):
                 print('Sample saved.\n')
             else:
@@ -89,32 +89,35 @@ class Logger:
 
     @staticmethod
     def get_last_sample(gesture):
-        save_dir = GESTURE.get_dir(gesture)
+        if isinstance(gesture, str):
+            gesture = GESTURE[gesture.upper()]
+        save_dir = gesture.get_dir()
 
         if os.listdir(save_dir) == []:
-            last_sample = ''
-        else:
-            nums = []
-            for f in os.listdir(save_dir):
-                num = f.split('.')[0]
-                num = num.split('_')[1]
-                nums.append(int(num))
-            nums.sort()
-            last_sample = 'sample_' + str(nums[-1]) + '.csv'
+            return
+
+        nums = []
+        for f in os.listdir(save_dir):
+            num = os.path.splitext(f)[0].split('_')[1]
+            nums.append(int(num))
+        last_sample = 'sample_' + str(max(nums)) + '.csv'
 
         return os.path.join(save_dir, last_sample)
 
     def discard_last_sample(self):
         last_sample = self.get_last_sample(self.gesture)
-        if last_sample[-1] != '/':
-            os.remove(last_sample)
-            print('File deleted.')
-        else:
+        if last_sample is None:
             print('No files.')
+            return
+
+        os.remove(last_sample)
+        print('File deleted.')
 
     @staticmethod
     def get_data(gesture):
-        save_dir = GESTURE.get_dir(gesture)
+        if isinstance(gesture, str):
+            gesture = GESTURE[gesture.upper()]
+        save_dir = gesture.get_dir()
         for f in tqdm(os.listdir(save_dir), desc='Files', leave=False):
             df = pd.read_csv(os.path.join(save_dir, f))
             num_of_frames = df.iloc[-1]['frame'] + 1
@@ -164,10 +167,10 @@ class Logger:
         if refresh_data:
             X = []
             y = []
-            for gesture in tqdm(GESTURE.get_all_gestures(), desc='Gestures'):
+            for gesture in tqdm(GESTURE, desc='Gestures'):
                 for sample in Logger.get_data(gesture):
                     X.append(sample)
-                    y.append(int(gesture))
+                    y.append(gesture.value)
             pickle.dump(X, open(X_file, 'wb'))
             pickle.dump(y, open(y_file, 'wb'))
         else:
