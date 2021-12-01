@@ -539,12 +539,12 @@ class Console(Cmd):
         while True:
             with self.listening_lock:
                 if not self.listening:
-                    break
+                    return
 
             data = self.mmwave.get_data()
 
             if data is None:
-                time.sleep(3)
+                time.sleep(.5)
                 continue
 
             self.data_queue.put(data)
@@ -557,7 +557,7 @@ class Console(Cmd):
         while True:
             with self.listening_lock:
                 if not self.listening:
-                    break
+                    return
 
             data = self.data_queue.get()
             frame = parser.assemble(data)
@@ -594,11 +594,10 @@ class Console(Cmd):
         num_of_frames = 50
 
         while True:
+            frame = self.model_queue.get()
             with self.predicting_lock:
                 if not self.predicting:
-                    break
-
-            frame = self.model_queue.get()
+                    return
 
             if not collecting:
                 collecting = True
@@ -634,7 +633,6 @@ class Console(Cmd):
                     empty_frames = []
                     collecting = False
                     frame_num = 0
-                    return True
 
             elif frame_num != 0:
                 empty_frames.append([[0.]*num_of_data_in_obj])
@@ -654,7 +652,7 @@ class Console(Cmd):
             frame = self.logging_queue.get()
             done = self.logger.log(frame)
             if done:
-                break
+                return
 
     def do_listen(self, args=''):
         '''
@@ -722,6 +720,7 @@ class Console(Cmd):
             with self.listening_lock:
                 if self.listening:
                     self.listening = False
+                    self.data_queue.put(None)
                     print('Listener stopped.')
             opts.remove('listen')
 
@@ -816,6 +815,8 @@ class Console(Cmd):
 
         with self.predicting_lock:
             self.predicting = False
+
+        self.model_queue.put(None)
 
     def do_start(self, args=''):
         '''
