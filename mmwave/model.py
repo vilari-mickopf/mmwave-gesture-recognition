@@ -196,7 +196,6 @@ class LstmModel(Model):
             layers.LSTM(256, recurrent_dropout=.5, dropout=.5, return_sequences=True),
             layers.LSTM(256, recurrent_dropout=.5, dropout=.5, return_sequences=True),
 
-            #  TemporalMaxPooling(),
             layers.GlobalAveragePooling1D(),
 
             layers.Dense(128),

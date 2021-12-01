@@ -14,7 +14,7 @@ class SignalHandler:
         self.signal_cnt = 0
         self.max_signal_cnt = 3
         self.detected_time = 0
-        self.timeout = 0.5
+        self.timeout = 1
         self.queue = queue
 
         signal(SIGINT, self.__ctrl_c_handler)
@@ -31,10 +31,9 @@ class SignalHandler:
 
         self.detected_time = time.perf_counter()
 
-        self.keyboard.press(Key.ctrl)
+        self.keyboard.press(Key.ctrl.value)
         self.keyboard.press('u')
         self.keyboard.release('u')
-        self.keyboard.release(Key.ctrl)
 
         self.keyboard.press(Key.enter)
         self.keyboard.release(Key.enter)

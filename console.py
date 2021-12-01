@@ -108,6 +108,7 @@ class Console(Cmd):
             if len(ports) > 2:
                 print(f'{Fore.YELLOW}Multiple ports detected.',
                       f'{Fore.YELLOW}Selecting ports {ports[0]} and {ports[1]}.')
+                ports = ports[:2]
 
             if platform.system() == 'Windows':
                 ports.sort(reverse=True)
@@ -467,7 +468,13 @@ class Console(Cmd):
         while not mmwave_configured and cnt < 5:
             mmwave_configured = self.mmwave.configure(cfg)
             if not mmwave_configured:
-                time.sleep(1)
+                signal_cnt = 0
+                while signal_cnt < 5:
+                    if not self.console_queue.empty():
+                        self.console_queue.get()
+                        return
+                    time.sleep(.2)
+                    signal_cnt += 1
             cnt += 1
 
         if not mmwave_configured:
