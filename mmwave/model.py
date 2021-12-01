@@ -1,7 +1,7 @@
 #! /usr/bin/env python
 
 import os
-import gc
+from abc import ABC, abstractmethod
 
 import numpy as np
 
@@ -36,7 +36,7 @@ def set_tensorflow_config(per_process_gpu_memory_fraction=1):
 set_tensorflow_config()
 
 
-class Model:
+class Model(ABC):
     def __init__(self, num_of_frames=50, num_of_objs=65, num_of_data_in_obj=5,
                  num_of_classes=9):
         self.model = None
@@ -83,6 +83,7 @@ class Model:
 
         return X
 
+    @abstractmethod
     def create_model(self):
         pass
 
@@ -106,12 +107,6 @@ class Model:
                                                             save_best_only=True)])
 
     def load(self):
-        # Clear old model from memory
-        del self.model
-        tf.keras.backend.clear_session()
-        tf.compat.v1.reset_default_graph()
-        gc.collect()
-
         print('Loading model...', end='')
         self.model = tf.keras.models.load_model(self.model_file)
         print(f'{Fore.GREEN}Done.')
