@@ -2,7 +2,6 @@
 
 import re
 import time
-import platform
 
 import serial
 import serial.tools.list_ports
@@ -13,7 +12,7 @@ colorama.init(autoreset=True)
 
 
 class Connection:
-    TIMEOUT = 1
+    TIMEOUT = .5
     BAUDRATES = [
         9600,
         38400,
@@ -45,38 +44,36 @@ class Connection:
                 return fn(self, *args, **kwargs)
         return wrapper
 
+    def connection_error_handler(fn):
+        def wrapper(self, *args, **kwargs):
+            try:
+                return fn(self, *args, **kwargs)
+            except(serial.SerialException, OSError):
+                print(f'{Fore.RED}Port \'{self.name}\' not available.',
+                      f'{Fore.RED}Check your connection and permissions')
+                self.print_available_ports()
+                self.port = None
+        return wrapper
+
+    @connection_error_handler
     def connect(self):
         if self.connected():
             self.disconnect()
 
-        if not self.valid_baudrate(self.rate):
-            return False
-
-        rate = self.rate
-        if rate is None:
-            rate = self.get_baudrate(self.name)
-
-        if rate is None:
-            return False
-
         print(f'Connecting to port {Fore.BLUE}\'{self.name}\'')
-        try:
-            self.port = serial.Serial(self.name,
-                                      bytesize=serial.EIGHTBITS,
-                                      parity=serial.PARITY_NONE,
-                                      stopbits=serial.STOPBITS_ONE,
-                                      xonxoff=False,
-                                      rtscts=False,
-                                      dsrdtr=False,
-                                      writeTimeout=0,
-                                      timeout=self.TIMEOUT)
+        self.port = serial.Serial(self.name,
+                                  bytesize=serial.EIGHTBITS,
+                                  parity=serial.PARITY_NONE,
+                                  stopbits=serial.STOPBITS_ONE,
+                                  xonxoff=False,
+                                  rtscts=False,
+                                  dsrdtr=False,
+                                  writeTimeout=0,
+                                  timeout=self.TIMEOUT)
 
-        except(serial.SerialException, OSError):
-            self.connection_error()
-            return False
+        if not self.set_baudrate(self.rate):
+            self.port = None
 
-        print(f'Selecting baud rate {Fore.BLUE}{rate}')
-        self.port.baudrate = rate
         return True
 
     @staticmethod
@@ -85,25 +82,30 @@ class Connection:
         for available_port in serial.tools.list_ports.comports():
             print(f'\t{Fore.YELLOW}{available_port}')
 
-    def connection_error(self):
-        print(f'{Fore.RED}Port \'{self.name}\' not available.',
-              f'{Fore.RED}Check your connection and permissions')
-        self.print_available_ports()
-        self.port = None
-
+    @if_connected
     def set_baudrate(self, rate=None):
+        detected_rate = self.get_baudrate()
+        if rate is None:
+            if detected_rate is None:
+                print(f'{Fore.YELLOW}Is the connection open?',
+                      f'{Fore.YELLOW}If not, baudrate should be specified manually.')
+                print(f'{Fore.RED}No valid baud rate detected.',
+                      f'{Fore.RED}Please check your connection.')
+                return False
+            else:
+                rate = detected_rate
+                print(f'Detected baud rate {Fore.BLUE}{detected_rate}.')
+        elif detected_rate is not None and rate != detected_rate:
+            print(f'{Fore.YELLOW}Specified rate {rate}, but detected {detected_rate}.')
+
         if not self.valid_baudrate(rate):
-            return
+            print(f'{Fore.RED}Invalid baud rate.')
+            return False
 
         self.rate = rate
-        if rate is None:
-            rate = self.get_baudrate(self.name)
-
-        if rate is None:
-            return
-
-        if self.connected():
-            self.port.baudrate = rate
+        self.port.baudrate = rate
+        print(f'Selecting baud rate {Fore.BLUE}{self.rate}')
+        return True
 
     def reset(self):
         self.close()
@@ -127,81 +129,44 @@ class Connection:
     def disconnect(self):
         print(f'Disconnecting port {Fore.BLUE}{self.name}')
         self.close()
-        time.sleep(1)
-
+        time.sleep(.5)
         self.port = None
 
     @if_connected
-    def write(self, data, encoding=None, size=None):
-        try:
-            if encoding is not None:
-                self.port.write(bytes(data, encoding=encoding))
-            else:
-                self.port.write(bytes(data))
-
-            if size is not None:
-                response = self.port.read(size)
-            else:
-                self.port.readline()
-                response = self.port.readline()
-            return response
-        except(serial.SerialException, OSError):
-            self.connection_error()
+    @connection_error_handler
+    def write(self, data):
+        self.port.write(data)
+        return self.port.readline()
 
     @if_connected
+    @connection_error_handler
     def read(self, size=None):
-        try:
-            if size is not None:
-                data = self.port.read(size)
-            else:
-                data = self.port.read(self.port.in_waiting)
-            return data
-        except(serial.SerialException, OSError):
-            self.connection_error()
+        if size is None:
+            size = self.port.in_waiting
+        return self.port.read(size)
 
-    @staticmethod
-    def get_baudrate(port):
-        print('Automatic baud rate search...', end='', flush=True)
+    @if_connected
+    @connection_error_handler
+    def readline(self):
+        return self.port.readline()
+
+    def check_baudrate(self, rate):
         test_packet = 'qWeRtYuIoPaSdFgHjKLzXcVbNm\n'
+        self.port.baudrate = rate
+        self.port.write(test_packet.encode())
 
-        try:
-            test_conn = serial.Serial(port, timeout=Connection.TIMEOUT,
-                                            write_timeout=Connection.TIMEOUT)
-        except(serial.SerialException, OSError):
-            print(f'{Fore.RED}Can\'t write to port.',
-                  'Please check your connection or permissions.')
-            return None
+        time.sleep(.01)
+        if test_packet.encode() in self.port.readline():
+            return True
+        return False
 
+    def get_baudrate(self):
         detected_baudrate = None
         for baudrate in reversed(Connection.BAUDRATES):
-            test_conn.baudrate = baudrate
-
-            start_time = time.perf_counter()
-            while time.perf_counter() - start_time < Connection.TIMEOUT:
-                try:
-                    test_conn.write(bytes(test_packet, encoding='ascii'))
-                except(serial.SerialTimeoutException, serial.SerialException, OSError):
-                    print(f'{Fore.RED}Can\'t write to port.',
-                          f'{Fore.RED}Please check your connection or permissions.')
-                    return None
-
-                time.sleep(.01)
-                response = test_conn.read(test_conn.in_waiting)
-                if bytes(test_packet, encoding='ascii') in response:
-                    detected_baudrate = baudrate
-                    break
-
-            if detected_baudrate is not None:
-                print(f'Detected baud rate {Fore.BLUE}{detected_baudrate}.')
+            if self.check_baudrate(baudrate):
+                detected_baudrate = baudrate
                 break
-        else:
-            print()
-            print(f'{Fore.YELLOW}Is the connection open?',
-                  f'{Fore.YELLOW}If not, baudrate should be specified manually.')
-            print(f'{Fore.RED}No valid baud rate detected.',
-                  f'{Fore.RED}Please check your connection.')
 
-        test_conn.close()
         return detected_baudrate
 
 
@@ -224,6 +189,19 @@ class mmWave:
         return cls(data_port=data_port, cli_port=cli_port,
                    data_rate=data_rate, cli_rate=cli_rate)
 
+    def check_console(self):
+        self.send_cmd('\n')
+        response = self.get_cmd()
+        if response is None:
+            return False
+        elif response == '':
+            print(f'{Fore.YELLOW}mmWave cli no init response. Flash mode is active.')
+            return False
+        elif 'mmwDemo:/>' not in response:
+            print(f'{Fore.RED}mmWave cli wrong init response: {response}.')
+            return False
+        return True
+
     def configure(self, config_file):
         with open(config_file, 'r') as f:
             lines = f.readlines()
@@ -234,23 +212,29 @@ class mmWave:
             if re.match(r'(^\s*%|^\s*$)', line):
                 continue
 
+            if not self.check_console():
+                self.config_file = None
+                return False
+
             # Send cmd
             print(f'Sending:  {Fore.YELLOW}{line}', end='')
-            response = self.cli_port.write(line, encoding='ascii')
+            response = self.send_cmd(line)
             if response is None:
                 self.config_file = None
                 return False
 
             # Parse response
-            response = response.decode('ascii', errors='ignore')
-            if 'Done' not in response and 'sensorStart' not in line:
+            response = self.get_cmd()
+            if 'Done' in response:
+                print(f'Received: {Fore.GREEN}{response}')
+            elif 'Ignored' in response or 'Debug:' in response:
+                print(f'Received: {Fore.YELLOW}{response}')
+            else:
                 print(f'Received: {Fore.RED}{response}')
                 print(f'{Fore.RED}Failed sending configuration')
                 self.reset()
                 self.config_file = None
                 return False
-            else:
-                print(f'Received: {Fore.GREEN}{response}')
 
             if 'sensorStart' not in line:
                 time.sleep(0.01)
@@ -262,6 +246,9 @@ class mmWave:
         self.cli_port.connect()
         if self.data_port is not self.cli_port:
             self.data_port.connect()
+
+        if self.connected():
+            self.check_console()
 
     def disconnect(self):
         self.cli_port.disconnect()
@@ -281,19 +268,22 @@ class mmWave:
 
     @staticmethod
     def find_ports(pattern='XDS110'):
-        ports = []
-        for port in serial.tools.list_ports.comports():
-            if pattern in str(port):
-                ports.append(str(port).split()[0])
-
+        ports = [str(p).split()[0] for p in serial.tools.list_ports.comports()
+                 if pattern in str(p)]
         ports.sort()
         return ports
 
-    def send_cmd(self, data, encoding=None, size=None):
-        return self.cli_port.write(data, encoding=encoding, size=size)
+    def send_cmd(self, cmd):
+        return self.cli_port.write(cmd.encode())
 
-    def get_cmd(self, size=None):
-        return self.cli_port.read(size=size)
+    def get_cmd(self):
+        response = self.cli_port.readline()
+        if response is not None:
+            response = response.decode(errors='ignore')
+        return response
 
     def get_data(self, size=None):
-        return self.data_port.read(size=size)
+        response = self.data_port.read(size=size)
+        if response is not None:
+            response = response.decode(errors='ignore')
+        return response
