@@ -7,7 +7,6 @@ import platform
 import readline
 import binascii
 import serial
-from copy import deepcopy
 
 import matplotlib.pyplot as plt
 
@@ -534,8 +533,8 @@ class Console(Cmd):
 
     @threaded
     def parse_thread(self):
-        parser = Parser(Formats(self.config))
-
+        formats = Formats(self.config)
+        parser = Parser(formats)
         while True:
             with self.listening_lock:
                 if not self.listening:
@@ -543,31 +542,29 @@ class Console(Cmd):
 
             data = self.data_queue.get()
             frames = parser.assemble(data)
-            if frames is not None:
-                for frame in frames.split(parser.formats.MAGIC_NUMBER):
-                    if not frame:
-                        continue
+            if frames is None:
+                continue
 
-                    parsed_frame = parser.parse(parser.formats.MAGIC_NUMBER+frame, warn=True)
-                    with self.logging_lock:
-                        if self.logging:
-                            self.logging_queue.put(parsed_frame)
+            for frame in frames.split(formats.MAGIC_NUMBER):
+                if not frame:
+                    continue
 
-                    with self.printing_lock:
-                        if self.printing:
-                            parser.pprint(parsed_frame)
+                parsed_frame = parser.parse(formats.MAGIC_NUMBER+frame, warn=True)
+                with self.logging_lock:
+                    if self.logging:
+                        self.logging_queue.put(parsed_frame)
 
-                    with self.plotting_lock:
-                        if self.plotting:
-                            self.plotter_queues['data'].put(parsed_frame)
+                with self.printing_lock:
+                    if self.printing:
+                        parser.pprint(parsed_frame)
 
-                    with self.predicting_lock:
-                        if self.predicting:
-                            self.model_queue.put(parsed_frame)
+                with self.plotting_lock:
+                    if self.plotting:
+                        self.plotter_queues['data'].put(parsed_frame)
 
-                time.sleep(.01)
-
-            #  time.sleep(.01)
+                with self.predicting_lock:
+                    if self.predicting:
+                        self.model_queue.put(parsed_frame)
 
     @threaded
     def predict_thread(self):
