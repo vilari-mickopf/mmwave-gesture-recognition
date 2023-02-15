@@ -28,7 +28,7 @@ pip3 install -e ./
 ```
 
 _Note: trans\_model is saved on lfs, because it has 200+mb, but github bandiwth is way too small so the file is now blocked. And additionally, the bandwith is not resetting after a month as supposed to, so I would advise just pulling it from [gitlab](https://gitlab.com/vilari-mickopf/mmwave-gesture-recognition) instead (without trans model, you can still use lstm or conv models)._
- 
+
 ## Serial permissions
 
 The group name can differ from distribution to distribution.
@@ -50,14 +50,13 @@ The change will take effect on the next login.
 The group name can be obtained by running:
 
 ```bash
-stat /dev/ttyACM0 | grep Gid
+stat /dev/ttyACM* | grep Gid
 ```
 
 ### One time only (permissions will be reseted after unplugging):
 
 ```bash
-chmod 666 /dev/ttyACM0
-chmod 666 /dev/ttyACM1
+chmod 666 /dev/ttyACM*
 ```
 
 ## Flashing

@@ -39,24 +39,21 @@ class Console(Cmd):
     def __init__(self, plotter_queues):
         super().__init__()
 
-        # Connection
-        self.cli_port = None
-        self.cli_rate = None
-        self.data_port = None
-        self.data_rate = None
-
-        self.default_cli_rate = 115200
-        self.default_data_rate = 921600
-
-        self.firmware_dir = 'firmware/'
+        self.firmware_dir = os.path.join(os.path.dirname(__file__), 'firmware')
         self.flasher = None
 
-        self.__mmwave_init()
+        # Connection
+        self.default_cli_rate = 115200
+        self.default_data_rate = 921600
+        self.mmwave_init(cli_port=None, data_port=None,
+                         cli_rate=self.default_cli_rate,
+                         data_rate=self.default_data_rate)
         if self.mmwave is None or self.mmwave.connected() is False:
             print('Try connecting manually. Type \'help connect\' for more info.\n')
 
         # Configuration
-        self.config_dir = 'mmwave/communication/profiles/'
+        self.config_dir = os.path.join(os.path.dirname(__file__),
+                                       'mmwave/communication/profiles')
         self.configured = False
         self.default_config = 'profile'
         self.config = None
@@ -64,7 +61,7 @@ class Console(Cmd):
         self.logger = Logger()
 
         self.model_type = 'lstm'
-        self.__set_model(self.model_type)
+        self.set_model(self.model_type)
 
         # Catching signals
         self.console_queue = Queue()
@@ -88,15 +85,18 @@ class Console(Cmd):
         self.model_queue = Queue()
         self.plotter_queues = plotter_queues
 
-        self.__set_prompt()
+        self.set_prompt()
         print(f'{Fore.GREEN}Init done.\n')
         print(f'{Fore.MAGENTA}--- mmWave console ---')
         warning('Type \'help\' for more information.')
 
-    def __mmwave_init(self):
+        self.do_send()
+        self.do_listen()
+
+    def mmwave_init(self, cli_port, data_port, cli_rate, data_rate):
         self.mmwave = None
-        if self.cli_port is None or self.data_port is None:
-            print('Looking for ports...', end='')
+        if cli_port is None or data_port is None:
+            print('Looking for ports...')
             ports = mmWave.find_ports()
 
             if len(ports) < 2:
@@ -113,33 +113,33 @@ class Console(Cmd):
             if platform.system() == 'Windows':
                 ports.sort(reverse=True)
 
-            self.cli_port = ports[0]
-            self.data_port = ports[1]
+            cli_port = ports[0]
+            data_port = ports[1]
 
-        self.mmwave = mmWave(self.cli_port, self.data_port,
-                             cli_rate=self.default_cli_rate,
-                             data_rate=self.default_data_rate)
+        self.mmwave = mmWave(cli_port, data_port,
+                             cli_rate=cli_rate,
+                             data_rate=data_rate)
         self.mmwave.connect()
         if self.mmwave.connected():
             self.flasher = Flasher(self.mmwave.cli_port)
 
-    def __is_connected(self):
+    def is_connected(self):
         if self.mmwave is None or not self.mmwave.connected():
             return False
         return True
 
-    def __set_prompt(self):
-        if self.__is_connected():
+    def set_prompt(self):
+        if self.is_connected():
             self.prompt = f'{Fore.GREEN}>>{Fore.RESET} '
         else:
             self.prompt = f'{Fore.RED}[Not connected]{Fore.RESET} >> '
 
-    def __set_model(self, type):
-        if type == 'conv':
+    def set_model(self, model_type):
+        if model_type == 'conv':
             self.model = ConvModel()
-        elif type == 'lstm':
+        elif model_type == 'lstm':
             self.model = LstmModel()
-        elif type == 'trans':
+        elif model_type == 'trans':
             self.model = TransModel()
 
     def preloop(self):
@@ -187,7 +187,7 @@ class Console(Cmd):
         If you want to stop the console, return something that evaluates to
         true. If you want to do some post command processing, do it here.
         '''
-        self.__set_prompt()
+        self.set_prompt()
         return stop
 
     def emptyline(self):
@@ -233,7 +233,7 @@ class Console(Cmd):
 
         self.do_stop()
 
-        if self.__is_connected():
+        if self.is_connected():
             self.mmwave.disconnect()
 
         os._exit(0)
@@ -267,7 +267,7 @@ class Console(Cmd):
                 return
             filepaths.append(filepath)
 
-        if not self.__is_connected():
+        if not self.is_connected():
             error('Not connected.')
             return
 
@@ -289,7 +289,7 @@ class Console(Cmd):
         self.flasher.flash(filepaths, erase=True)
         print(f'{Fore.GREEN}Done.')
 
-    def __complete_from_list(self, complete_list, text, line):
+    def complete_from_list(self, complete_list, text, line):
         mline = line.partition(' ')[2]
         offs = len(mline) - len(text)
         return [s[offs:] for s in complete_list if s.startswith(mline)]
@@ -299,7 +299,7 @@ class Console(Cmd):
         for file in glob.glob(os.path.join(self.firmware_dir, '*.bin')):
             completions.append(os.path.basename(file))
 
-        return self.__complete_from_list(completions, text, line)
+        return self.complete_from_list(completions, text, line)
 
     def do_autoconnect(self, args=''):
         '''
@@ -318,15 +318,15 @@ class Console(Cmd):
             error('Unknown arguments.')
             return
 
-        if self.__is_connected():
+        if self.is_connected():
             warning('Already connected.')
             print('Reconnecting...')
 
-        self.cli_port = None
-        self.data_port = None
-        self.__mmwave_init()
+        self.mmwave_init(cli_port=None, data_port=None,
+                         cli_rate=self.default_cli_rate,
+                         data_rate=self.default_data_rate)
 
-    def __get_user_port(self, type):
+    def get_user_port(self, type):
         old_completer = readline.get_completer()
 
         ports = []
@@ -354,7 +354,7 @@ class Console(Cmd):
         readline.set_completer(old_completer)
         return port
 
-    def __get_user_rate(self, type, port):
+    def get_user_rate(self, type):
         old_completer = readline.get_completer()
 
         rates = []
@@ -363,27 +363,27 @@ class Console(Cmd):
 
         compl_rates = Completer(rates)
         readline.set_completer(compl_rates.list_completer)
-        rate = None
-        while rate is None:
+        rate = -1
+        while rate == -1:
             rate = input(f'{Fore.YELLOW}{type} rate:{Fore.RESET} ').strip()
             if rate in ['q', 'exit']:
                 break
             elif rate == '':
-                rate = Connection.get_baudrate(port)
+                rate = None
             elif rate not in rates:
                 error(f'Rate {rate} is not valid.')
                 warning('Valid baudrates:')
                 for rate in rates:
                     warning('\t' + rate)
                 warning('Type \'exit\' to return.')
-                rate = None
+                rate = -1
             else:
                 rate = int(rate)
 
         readline.set_completer(old_completer)
         return rate
 
-    def __model_loaded(self):
+    def model_loaded(self):
         return self.model.model is not None
 
     def do_connect(self, args=''):
@@ -412,25 +412,20 @@ class Console(Cmd):
             error('Unknown arguments.')
             return
 
-        if self.__is_connected():
+        if self.is_connected():
             self.mmwave.disconnect()
             print()
 
-        port = self.__get_user_port('cli')
-        if port is not None:
-            self.cli_port = port
-            self.cli_rate = self.__get_user_rate('cli', port)
-        else:
-            return
+        ports = {}
+        for name in ['cli', 'data']:
+            port = self.get_user_port(name)
+            if port is not None:
+                ports[f'{name}_port'] = port
+                ports[f'{name}_rate'] = self.get_user_rate(name)
+            else:
+                return
 
-        port = self.__get_user_port('data')
-        if port is not None:
-            self.data_port = port
-            self.data_rate = self.__get_user_rate('data', port)
-        else:
-            return
-
-        self.__mmwave_init()
+        self.mmwave_init(**ports)
 
     def do_send(self, args=''):
         '''
@@ -454,7 +449,7 @@ class Console(Cmd):
             error('Too many arguments.')
             return
 
-        if not self.__is_connected():
+        if not self.is_connected():
             error('Not connected.')
             return
 
@@ -463,20 +458,7 @@ class Console(Cmd):
             print('Unknown profile.')
             return
 
-        mmwave_configured = False
-        cnt = 0
-        while not mmwave_configured and cnt < 5:
-            mmwave_configured = self.mmwave.configure(cfg)
-            if not mmwave_configured:
-                signal_cnt = 0
-                while signal_cnt < 5:
-                    if not self.console_queue.empty():
-                        self.console_queue.get()
-                        return
-                    time.sleep(.2)
-                    signal_cnt += 1
-            cnt += 1
-
+        mmwave_configured = self.mmwave.configure(cfg)
         if not mmwave_configured:
             return
 
@@ -491,7 +473,7 @@ class Console(Cmd):
         for file in glob.glob(os.path.join(self.config_dir, '*.cfg')):
             completions.append('.'.join(os.path.basename(file).split('.')[:-1]))
 
-        return self.__complete_from_list(completions, text, line)
+        return self.complete_from_list(completions, text, line)
 
     def do_set_model(self, args=''):
         '''
@@ -514,10 +496,10 @@ class Console(Cmd):
             return
 
         self.model_type = args
-        self.__set_model(args)
+        self.set_model(args)
 
     def complete_set_model(self, text, line, begidx, endidx):
-        return self.__complete_from_list(['conv', 'lstm', 'trans'], text, line)
+        return self.complete_from_list(['conv', 'lstm', 'trans'], text, line)
 
     def do_get_model(self, args=''):
         '''
@@ -534,7 +516,7 @@ class Console(Cmd):
         print(f'Current model type: {self.model_type}')
 
     @threaded
-    def __listen_thread(self):
+    def listen_thread(self):
         print(f'{Fore.CYAN}=== Listening ===')
         while True:
             with self.listening_lock:
@@ -544,14 +526,14 @@ class Console(Cmd):
             data = self.mmwave.get_data()
 
             if data is None:
-                time.sleep(.5)
+                time.sleep(.1)
                 continue
 
             self.data_queue.put(data)
-            time.sleep(.05)
+            time.sleep(.01)
 
     @threaded
-    def __parse_thread(self):
+    def parse_thread(self):
         parser = Parser(Formats(self.config))
 
         while True:
@@ -560,30 +542,35 @@ class Console(Cmd):
                     return
 
             data = self.data_queue.get()
-            frame = parser.assemble(data)
+            frames = parser.assemble(data)
+            if frames is not None:
+                for frame in frames.split(parser.formats.MAGIC_NUMBER):
+                    if not frame:
+                        continue
 
-            if frame is not None:
-                frame = parser.parse(deepcopy(frame), warn=True)
-                with self.logging_lock:
-                    if self.logging:
-                        self.logging_queue.put(frame)
+                    parsed_frame = parser.parse(parser.formats.MAGIC_NUMBER+frame, warn=True)
+                    with self.logging_lock:
+                        if self.logging:
+                            self.logging_queue.put(parsed_frame)
 
-                with self.printing_lock:
-                    if self.printing:
-                        parser.pprint(frame)
+                    with self.printing_lock:
+                        if self.printing:
+                            parser.pprint(parsed_frame)
 
-                with self.plotting_lock:
-                    if self.plotting:
-                        self.plotter_queues['data'].put(frame)
+                    with self.plotting_lock:
+                        if self.plotting:
+                            self.plotter_queues['data'].put(parsed_frame)
 
-                with self.predicting_lock:
-                    if self.predicting:
-                        self.model_queue.put(frame)
+                    with self.predicting_lock:
+                        if self.predicting:
+                            self.model_queue.put(parsed_frame)
 
-            time.sleep(.05)
+                time.sleep(.01)
+
+            #  time.sleep(.01)
 
     @threaded
-    def __predict_thread(self):
+    def predict_thread(self):
         collecting = False
         sequence = []
         empty_frames = []
@@ -647,7 +634,7 @@ class Console(Cmd):
                     self.model.predict([sequence])
 
     @threaded
-    def __logging_thread(self):
+    def logging_thread(self):
         while True:
             frame = self.logging_queue.get()
             done = self.logger.log(frame)
@@ -682,8 +669,8 @@ class Console(Cmd):
         with self.listening_lock:
             self.listening = True
 
-        self.__listen_thread()
-        self.__parse_thread()
+        self.listen_thread()
+        self.parse_thread()
 
     def do_stop(self, args=''):
         '''
@@ -734,7 +721,7 @@ class Console(Cmd):
             warning(f'Unknown option: {opt}. Skipped.')
 
     def complete_stop(self, text, line, begidx, endidx):
-        return self.__complete_from_list(['mmwave', 'listen', 'plot'], text, line)
+        return self.complete_from_list(['mmwave', 'listen', 'plot'], text, line)
 
     def do_print(self, args=''):
         '''
@@ -802,14 +789,14 @@ class Console(Cmd):
                 error('Listener not started.')
                 return
 
-        if not self.__model_loaded():
+        if not self.model_loaded():
             self.model.load()
             print()
 
         with self.predicting_lock:
             self.predicting = True
 
-        self.__predict_thread()
+        self.predict_thread()
 
         self.console_queue.get()
 
@@ -832,7 +819,7 @@ class Console(Cmd):
             error('Unknown arguments.')
             return
 
-        if not self.__model_loaded():
+        if not self.model_loaded():
             self.model.load()
             print()
 
@@ -868,7 +855,7 @@ class Console(Cmd):
             warning(f'Unknown argument: {args}')
             return
 
-        X, y = Logger.get_all_data(refresh_data=refresh_data)
+        X, y = Logger.get_all_data(reread=refresh_data)
         Logger.get_stats(X, y)
         X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=.3,
                                                           stratify=y,
@@ -876,7 +863,7 @@ class Console(Cmd):
         self.model.train(X_train, y_train, X_val, y_val)
 
     def complete_train(self, text, line, begidx, endidx):
-        return self.__complete_from_list(['refresh'], text, line)
+        return self.complete_from_list(['refresh'], text, line)
 
     def do_eval(self, args=''):
         '''
@@ -911,7 +898,7 @@ class Console(Cmd):
                                                           stratify=y,
                                                           random_state=12)
 
-        if not self.__model_loaded():
+        if not self.model_loaded():
             self.model.load()
             print()
 
@@ -928,7 +915,7 @@ class Console(Cmd):
         print()
 
     def complete_eval(self, text, line, begidx, endidx):
-        return self.__complete_from_list(['refresh'], text, line)
+        return self.complete_from_list(['refresh'], text, line)
 
     def do_log(self, args=''):
         '''
@@ -966,19 +953,19 @@ class Console(Cmd):
         with self.logging_lock:
             self.logging = True
 
-        self.__logging_thread().join()
+        self.logging_thread().join()
 
         with self.logging_lock:
             self.logging = False
 
-    def __complete_gestures(self, text, line):
+    def complete_gestures(self, text, line):
         completions = []
         for gesture in GESTURE:
             completions.append(gesture.name.lower())
-        return self.__complete_from_list(completions, text, line)
+        return self.complete_from_list(completions, text, line)
 
     def complete_log(self, text, line, begidx, endidx):
-        return self.__complete_gestures(text, line)
+        return self.complete_gestures(text, line)
 
     def do_remove(self, args=''):
         '''
@@ -1009,7 +996,7 @@ class Console(Cmd):
         self.logger.discard_last_sample()
 
     def complete_remove(self, text, line, begidx, endidx):
-        return self.__complete_gestures(text, line)
+        return self.complete_gestures(text, line)
 
     def do_redraw(self, args=''):
         '''
@@ -1045,7 +1032,7 @@ class Console(Cmd):
         self.plotter_queues['cli'].put(args)
 
     def complete_redraw(self, text, line, begidx, endidx):
-        return self.__complete_gestures(text, line)
+        return self.complete_gestures(text, line)
 
 
 @threaded
@@ -1102,7 +1089,7 @@ def plotting(plotter_queues):
             except queue.Empty:
                 pass
 
-        time.sleep(.05)
+        time.sleep(.01)
 
 
 if __name__ == '__main__':

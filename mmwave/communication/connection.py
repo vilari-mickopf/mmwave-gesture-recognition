@@ -112,20 +112,24 @@ class Connection:
         self.open()
 
     @if_connected
+    @connection_error_handler
     def open(self):
         self.port.open()
 
     @if_connected
+    @connection_error_handler
     def close(self):
         self.port.close()
 
     @if_connected
+    @connection_error_handler
     def flush(self):
         self.port.send_break(.1)
         self.port.flushInput()
         self.port.flushOutput()
 
     @if_connected
+    @connection_error_handler
     def disconnect(self):
         print(f'Disconnecting port {Fore.BLUE}{self.name}')
         self.close()
@@ -156,7 +160,7 @@ class Connection:
         self.port.write(test_packet.encode())
 
         time.sleep(.01)
-        if test_packet.encode() in self.port.readline():
+        if test_packet.encode() in self.read():
             return True
         return False
 
@@ -247,6 +251,8 @@ class mmWave:
         if self.data_port is not self.cli_port:
             self.data_port.connect()
 
+        time.sleep(.5)
+        self.get_cmd()
         if self.connected():
             self.check_console()
 
@@ -283,7 +289,4 @@ class mmWave:
         return response
 
     def get_data(self, size=None):
-        response = self.data_port.read(size=size)
-        if response is not None:
-            response = response.decode(errors='ignore')
-        return response
+        return self.data_port.read(size=size)

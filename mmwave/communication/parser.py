@@ -17,10 +17,10 @@ colorama.init(autoreset=True)
 class Parser:
     def __init__(self, formats):
         self.sync = False
-        self.sync_time = 0
+        self.sync_time = -1
         self.sync_timeout = 2
 
-        self.buffer = bytearray(b'')
+        self.buffer = bytearray()
 
         self.formats = formats
 
@@ -32,8 +32,7 @@ class Parser:
         if data is None:
             return None
 
-        start_idx = data.find(self.formats.MAGIC_NUMBER)
-        if start_idx == 0:
+        if data.find(self.formats.MAGIC_NUMBER) == 0:
             # Save return value, and start capturing new frame
             frame = deepcopy(self.buffer)
             self.buffer = bytearray(data)
@@ -46,7 +45,7 @@ class Parser:
             return frame
 
         elif self.sync is False:
-            if self.sync_time == 0:
+            if self.sync_time == -1:
                 self.sync_time = time.perf_counter()
                 print(f'{Fore.YELLOW}Waiting for sync...')
 
@@ -54,72 +53,74 @@ class Parser:
             if time.perf_counter() - self.sync_time > self.sync_timeout:
                 print(f'{Fore.RED}No sync received.')
                 print('Please check your board.\n')
-                self.sync_time = 0
+                self.sync_time = -1
 
         else:
             # Wait for rest of the frame
-            self.buffer.extend(bytearray(data))
+            self.buffer += bytearray(data)
 
             # Capture long no data time
-            if data == b'':
-                if time.perf_counter() - self.sync_time > self.sync_timeout:
-                    print(f'{Fore.RED}Not receiving data. Resyncing...')
-                    self.sync_time = 0
-                    self.sync = False
+            if not data and ((time.perf_counter() - self.sync_time) > self.sync_timeout):
+                print(f'{Fore.RED}Not receiving data. Resyncing...')
+                self.sync_time = -1
+                self.sync = False
 
     def parse(self, frame, warn=False):
         self.frame = frame
 
-        header = self.__parse_struct(self.formats.header, echo=warn)
+        header = self.parse_struct(self.formats.header, echo=warn)
         if header is None:
-            return None
+            return
 
         header = header['values']
 
-        if not self.__len_check(header['packet_len'], len(frame), echo=warn):
-            return None
+        if not self.len_check(header['packet_len'], len(frame), echo=warn):
+            return
 
-        self.__header_frame_num_check(header, echo=warn)
+        if header['num_tlvs'] is None:
+            if warn:
+                print(f'{Fore.RED}ERROR: Corrupted frame.')
+            return
+
+        self.header_frame_num_check(header, echo=warn)
 
         tlvs = {}
         for tlv in range(header['num_tlvs']):
-            tlv_type = self.__parse_value('I', echo=warn)
-            tlv_len = self.__parse_value('I', echo=warn)
+            tlv_type = self.parse_value('I', echo=warn)
+            tlv_len = self.parse_value('I', echo=warn)
 
             if self.formats.tlvs.get(tlv_type) is None:
-                return None
+                return
 
             tlv_format = self.formats.tlvs[tlv_type]
-            tlvs[tlv_type] = self.__parse_struct(tlv_format, echo=warn)
+            tlvs[tlv_type] = self.parse_struct(tlv_format, echo=warn)
 
         return {'header': header, 'tlvs': tlvs}
 
-    def __parse_struct(self, struct_format, echo=False):
+    def parse_struct(self, struct_format, echo=False):
         parsed_struct = {}
         for key, value_format in struct_format.items():
             if isinstance(value_format, dict):
-                value = self.__parse_struct(value_format, echo)
+                value = self.parse_struct(value_format, echo)
             elif key == 'objs' and isinstance(value_format, list):
                 size_idxs = value_format[0].split('.')
                 size = parsed_struct[size_idxs[0]]
                 for i in size_idxs[1:]:
                     size = size[i]
 
-                value = []
-                for obj in range(size):
-                    value.append(self.__parse_struct(value_format[1], echo))
+                value = [self.parse_struct(value_format[1], echo) for _ in range(size)]
             else:
                 if key == 'name':
                     value = value_format
                 else:
-                    value = self.__parse_value(value_format, echo)
+                    value = self.parse_value(value_format, echo)
             parsed_struct[key] = value
         return parsed_struct
 
-    def __parse_value(self, value_format, echo=False):
+    def parse_value(self, value_format, echo=False):
         size = struct.calcsize(value_format)
-        if not self.__len_check(len(self.frame), size, echo=echo):
-            return None
+        if not self.len_check(len(self.frame), size, echo=echo):
+            return
 
         value = struct.unpack(value_format, self.frame[:size])
         self.frame = self.frame[size:]
@@ -133,14 +134,18 @@ class Parser:
             value = ':'.join(format(x, '02x') for x in value)
         return value
 
-    def __header_frame_num_check(self, header, echo=False):
+    def header_frame_num_check(self, header, echo=False):
         if self.frame_num != 0 and self.frame_num + 1 != header['frame_num']:
             if echo:
                 num_of_missed_frames = header['frame_num'] - self.frame_num - 1
-                print(f'{Fore.YELLOW}WARNING: Missed {num_of_missed_frames} frames.')
+                print(f'{Fore.YELLOW}WARNING: Missed {num_of_missed_frames} ', end='')
+                if num_of_missed_frames > 1:
+                    print(f'{Fore.YELLOW}frames.')
+                else:
+                    print(f'{Fore.YELLOW}frame.')
         self.frame_num = header['frame_num']
 
-    def __len_check(self, received, expected, echo=False):
+    def len_check(self, received, expected, echo=False):
         if received < expected:
             if echo:
                 print(f'{Fore.RED}ERROR: Corrupted frame.')
@@ -154,48 +159,48 @@ class Parser:
             return
 
         print(Fore.CYAN + '='*85)
-        Parser.__pprint_struct(frame)
+        Parser.pprint_struct(frame)
         print(Fore.CYAN + '='*85)
         print()
 
     @staticmethod
-    def __pprint_struct(frame, indentation='', _recursive_call=False):
+    def pprint_struct(frame, indentation='', _recursive_call=False):
         identetion_marker = '|' + 3*' '
 
         if not _recursive_call:
-            Parser.__pprint_struct.num = 1
+            Parser.pprint_struct.num = 1
 
         for key, value in frame.items():
             if isinstance(value, dict):
                 print(indentation, end='')
-                color = Parser.__pprint_get_color(Parser.__pprint_struct.num - 1)
+                color = Parser.pprint_get_color(Parser.pprint_struct.num - 1)
                 print(f'{color}{key}:')
 
                 indentation += identetion_marker
-                Parser.__pprint_struct.num += 1
-                Parser.__pprint_struct(value, indentation, True)
-                Parser.__pprint_struct.num -= 1
+                Parser.pprint_struct.num += 1
+                Parser.pprint_struct(value, indentation, True)
+                Parser.pprint_struct.num -= 1
                 indentation = indentation[:-4]
 
                 if key != sorted(frame.keys())[-1]:
                     print(indentation)
             elif isinstance(value, list):
                 print(indentation, end='')
-                color = Parser.__pprint_get_color(Parser.__pprint_struct.num - 1)
+                color = Parser.pprint_get_color(Parser.pprint_struct.num - 1)
                 print(f'{color}{key}:')
 
                 indentation += identetion_marker
                 for obj in value:
-                    Parser.__pprint_struct.num += 1
-                    Parser.__pprint_struct(obj, indentation, True)
-                    Parser.__pprint_struct.num -= 1
+                    Parser.pprint_struct.num += 1
+                    Parser.pprint_struct(obj, indentation, True)
+                    Parser.pprint_struct.num -= 1
                     if obj != value[-1]:
                         print(indentation)
                 indentation = indentation[:-4]
             else:
                 if isinstance(value, tuple):
                     print(indentation, end='')
-                    color = Parser.__pprint_get_color(Parser.__pprint_struct.num - 1)
+                    color = Parser.pprint_get_color(Parser.pprint_struct.num - 1)
                     print(f'{color}{key}:')
                     indentation += identetion_marker
 
@@ -216,11 +221,11 @@ class Parser:
                     indentation = indentation[:-4]
                 else:
                     print(indentation, end='')
-                    color = Parser.__pprint_get_color(Parser.__pprint_struct.num - 1)
+                    color = Parser.pprint_get_color(Parser.pprint_struct.num - 1)
                     print(f'{color}{key}: {value}')
 
     @staticmethod
-    def __pprint_get_color(num_of_identations):
+    def pprint_get_color(num_of_identations):
         if num_of_identations % 4 == 0:
             return Fore.BLUE
         elif num_of_identations % 3 == 0:
