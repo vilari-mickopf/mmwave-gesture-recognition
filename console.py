@@ -1,20 +1,15 @@
 #! /usr/bin/env python
 
-import time
 import glob
 import os
 import platform
 import readline
 import binascii
+import queue
 import serial
-
-import matplotlib.pyplot as plt
+import time
 
 from cmd import Cmd
-
-from threading import Lock
-import queue
-from queue import Queue
 
 from sklearn.model_selection import train_test_split
 
@@ -23,19 +18,23 @@ from mmwave.communication.parser import Parser
 from mmwave.data.formats import Formats, GESTURE
 from mmwave.data.logger import Logger
 from mmwave.model import ConvModel, LstmModel, TransModel
-from mmwave.utils.completer import Completer
 from mmwave.utils.plotter import Plotter
-from mmwave.utils.handlers import SignalHandler
-from mmwave.utils.utility_functions import threaded, print, error, warning
+from mmwave.utils.prints import print, error, warning
 from mmwave.utils.flasher import Flasher, CMD, OPCODE
 
 import colorama
 from colorama import Fore
 colorama.init(autoreset=True)
 
+from completer import Completer
+from handlers import SignalHandler
+
+from threads import threaded, ListenThread, ParseThread, PrintThread
+from threads import LogThread, PredictThread, PlotThread
+
 
 class Console(Cmd):
-    def __init__(self, plotter_queues):
+    def __init__(self, main_queue):
         super().__init__()
 
         self.firmware_dir = os.path.join(os.path.dirname(__file__), 'firmware')
@@ -53,9 +52,10 @@ class Console(Cmd):
         # Configuration
         self.config_dir = os.path.join(os.path.dirname(__file__),
                                        'mmwave/communication/profiles')
-        self.configured = False
+        self._configured = None
         self.default_config = 'profile'
         self.config = None
+        self.parser = None
 
         self.logger = Logger()
 
@@ -63,34 +63,34 @@ class Console(Cmd):
         self.set_model(self.model_type)
 
         # Catching signals
-        self.console_queue = Queue()
+        self.console_queue = queue.Queue()
         SignalHandler(self.console_queue)
 
         # Threading stuff
-        self.listening_lock = Lock()
-        self.printing_lock = Lock()
-        self.plotting_lock = Lock()
-        self.predicting_lock = Lock()
-        self.logging_lock = Lock()
+        self.main_queue = main_queue
+        self.plotter_queue = queue.Queue()
+        self.plotter = Plotter(self.plotter_queue)
 
-        self.listening = False
-        self.printing = False
-        self.plotting = False
-        self.predicting = False
-        self.logging = False
-
-        self.logging_queue = Queue()
-        self.data_queue = Queue()
-        self.model_queue = Queue()
-        self.plotter_queues = plotter_queues
+        self.listen_thread = None
+        self.parse_thread = None
+        self.print_thread = None
+        self.plot_thread = None
+        self.log_thread = None
+        self.predict_thread = None
 
         self.set_prompt()
         print(f'{Fore.GREEN}Init done.\n')
         print(f'{Fore.MAGENTA}--- mmWave console ---')
         warning('Type \'help\' for more information.')
 
-        self.do_send()
-        self.do_listen()
+    @property
+    def configured(self):
+        return self._configured
+
+    @configured.setter
+    def configured(self, value):
+        self._configured = value
+        self.parser = Parser(Formats(self.config)) if value else None
 
     def mmwave_init(self, cli_port, data_port, cli_rate, data_rate):
         self.mmwave = None
@@ -161,6 +161,17 @@ class Console(Cmd):
         Cmd.postloop(self)   # Clean up command completion
         print('Exiting...')
 
+    def check_plotter(self):
+        try:
+            info = self.plotter_queue.get(False)
+        except queue.Empty:
+            return
+
+        if info == 'closed':
+            print(f'{Fore.YELLOW}Plotter closed.\n')
+            if self.check_thread('plot', warn=False):
+                self.plot_thread.stop()
+
     def precmd(self, line):
         '''
         This method is called after the line has been input but before
@@ -168,16 +179,7 @@ class Console(Cmd):
         before execution (for example, variable substitution) do it here.
         '''
         self._hist += [line.strip()]
-
-        try:
-            info = self.plotter_queues['info'].get(False)
-            if info == 'closed':
-                print(f'{Fore.YELLOW}Plotter closed.\n')
-                with self.plotting_lock:
-                    if self.plotting:
-                        self.plotting = False
-        except queue.Empty:
-            pass
+        self.check_plotter()
 
         return line
 
@@ -356,10 +358,7 @@ class Console(Cmd):
     def get_user_rate(self, type):
         old_completer = readline.get_completer()
 
-        rates = []
-        for rate in Connection.BAUDRATES:
-            rates.append(str(rate))
-
+        rates = [str(rate) for rate in Connection.BAUDRATES]
         compl_rates = Completer(rates)
         readline.set_completer(compl_rates.list_completer)
         rate = -1
@@ -426,7 +425,7 @@ class Console(Cmd):
 
         self.mmwave_init(**ports)
 
-    def do_send(self, args=''):
+    def do_configure(self, args=''):
         '''
         Sending configuration to mmWave
 
@@ -438,8 +437,8 @@ class Console(Cmd):
         used.
 
         Usage:
-        >> send
-        >> send profile
+        >> configure
+        >> configure profile
         '''
         if args == '':
             args = self.default_config
@@ -452,22 +451,32 @@ class Console(Cmd):
             error('Not connected.')
             return
 
-        cfg = os.path.join(self.config_dir, args + '.cfg')
-        if cfg not in glob.glob(os.path.join(self.config_dir, '*.cfg')):
-            print('Unknown profile.')
+        config = os.path.join(self.config_dir, f'{args}.cfg')
+        if config not in glob.glob(os.path.join(self.config_dir, '*.cfg')):
+            error('Unknown profile.')
             return
 
-        mmwave_configured = self.mmwave.configure(cfg)
+        if not self.configured and os.path.basename(config) == 'start.cfg':
+            error('Can\'t start. mmWave not configured.')
+            return
+
+        mmwave_configured = self.mmwave.configure(config)
         if not mmwave_configured:
+            self.configured = False
             return
 
-        if os.path.basename(cfg) == 'stop.cfg':
+        if os.path.basename(config) == 'start.cfg':
+            return
+        elif os.path.basename(config) == 'stop.cfg':
             self.configured = False
-        else:
-            self.configured = True
-        self.config = cfg
+            if self.check_thread('listen', warn=True):
+                warning('Stopping listener.')
+                self.listen_thread.stop()
 
-    def complete_send(self, text, line, begidx, endidx):
+        self.config = config
+        self.configured = False if os.path.basename(config) == 'stop.cfg' else True
+
+    def complete_configure(self, text, line, begidx, endidx):
         completions = []
         for file in glob.glob(os.path.join(self.config_dir, '*.cfg')):
             completions.append('.'.join(os.path.basename(file).split('.')[:-1]))
@@ -514,129 +523,15 @@ class Console(Cmd):
 
         print(f'Current model type: {self.model_type}')
 
-    @threaded
-    def listen_thread(self):
-        print(f'{Fore.CYAN}=== Listening ===')
-        while True:
-            with self.listening_lock:
-                if not self.listening:
-                    return
+    def check_thread(self, name, warn=True):
+        thread = getattr(self, f'{name}_thread')
+        if thread is not None and thread.is_alive():
+            return True
 
-            data = self.mmwave.get_data()
+        if warn:
+            warning(f'{name} thread not started.')
 
-            if data is None:
-                time.sleep(.1)
-                continue
-
-            self.data_queue.put(data)
-            time.sleep(.01)
-
-    @threaded
-    def parse_thread(self):
-        formats = Formats(self.config)
-        parser = Parser(formats)
-        while True:
-            with self.listening_lock:
-                if not self.listening:
-                    return
-
-            data = self.data_queue.get()
-            frames = parser.assemble(data)
-            if frames is None:
-                continue
-
-            for frame in frames.split(formats.MAGIC_NUMBER):
-                if not frame:
-                    continue
-
-                parsed_frame = parser.parse(formats.MAGIC_NUMBER+frame, warn=True)
-                with self.logging_lock:
-                    if self.logging:
-                        self.logging_queue.put(parsed_frame)
-
-                with self.printing_lock:
-                    if self.printing:
-                        parser.pprint(parsed_frame)
-
-                with self.plotting_lock:
-                    if self.plotting:
-                        self.plotter_queues['data'].put(parsed_frame)
-
-                with self.predicting_lock:
-                    if self.predicting:
-                        self.model_queue.put(parsed_frame)
-
-    @threaded
-    def predict_thread(self):
-        collecting = False
-        sequence = []
-        empty_frames = []
-        detected_time = time.perf_counter()
-        frame_num = 0
-
-        num_of_data_in_obj = 5
-        num_of_frames = 50
-
-        while True:
-            frame = self.model_queue.get()
-            with self.predicting_lock:
-                if not self.predicting:
-                    return
-
-            if not collecting:
-                collecting = True
-                sequence = []
-                detected_time = time.perf_counter()
-
-            if (frame is not None and
-                    frame.get('tlvs') is not None and
-                    frame['tlvs'].get(1) is not None):
-                detected_time = time.perf_counter()
-                if frame_num == 0:
-                    sequence = []
-
-                for empty_frame in empty_frames:
-                    sequence.append(empty_frame)
-                    empty_frames = []
-
-                objs = []
-                for obj in frame['tlvs'][1]['values']['objs']:
-                    if obj is None or None in obj.values():
-                        continue
-                    objs.append([
-                        obj['x_coord']/65535.,
-                        obj['y_coord']/65535.,
-                        obj['range_idx']/65535.,
-                        obj['peak_value']/65535.,
-                        obj['doppler_idx']/65535.
-                    ])
-                sequence.append(objs)
-                frame_num += 1
-
-                if frame_num >= num_of_frames:
-                    empty_frames = []
-                    collecting = False
-                    frame_num = 0
-
-            elif frame_num != 0:
-                empty_frames.append([[0.]*num_of_data_in_obj])
-                frame_num += 1
-
-            if time.perf_counter() - detected_time > .5:
-                empty_frames = []
-                collecting = False
-                frame_num = 0
-
-                if len(sequence) > 3:
-                    self.model.predict([sequence])
-
-    @threaded
-    def logging_thread(self):
-        while True:
-            frame = self.logging_queue.get()
-            done = self.logger.log(frame)
-            if done:
-                return
+        return False
 
     def do_listen(self, args=''):
         '''
@@ -658,16 +553,16 @@ class Console(Cmd):
             warning('mmWave not configured.')
             return
 
-        with self.listening_lock:
-            if self.listening:
-                warning('Listener already started.')
-                return
+        if self.check_thread('listen', warn=False):
+            warning('listen thread already started.')
+            return
 
-        with self.listening_lock:
-            self.listening = True
-
-        self.listen_thread()
-        self.parse_thread()
+        print(f'{Fore.CYAN}=== Listening ===')
+        self.listen_thread = ListenThread(self.mmwave)
+        self.parse_thread = ParseThread(Parser(Formats(self.config)))
+        self.parse_thread.start()
+        self.listen_thread.start()
+        self.listen_thread.forward_to(self.parse_thread)
 
     def do_stop(self, args=''):
         '''
@@ -693,24 +588,21 @@ class Console(Cmd):
             opts = args.split()
 
         if 'plot' in opts:
-            with self.plotting_lock:
-                if self.plotting:
-                    self.plotting = False
-                    print('Plotter stopped.')
-            self.plotter_queues['cli'].put('close')
+            if self.check_thread('plot', warn=False):
+                self.plot_thread.stop()
+                print('Plotter stopped.')
+                self.plot_thread.send_to_main(self.plotter.close)
             opts.remove('plot')
 
         if 'listen' in opts:
-            with self.listening_lock:
-                if self.listening:
-                    self.listening = False
-                    self.data_queue.put(None)
-                    print('Listener stopped.')
+            if self.check_thread('listen', warn=False):
+                self.listen_thread.stop()
+                print('Listener stopped.')
             opts.remove('listen')
 
         if 'mmwave' in opts:
             if self.configured:
-                self.do_send('stop')
+                self.do_configure('stop')
             print('mmWave stopped.')
             opts.remove('mmwave')
 
@@ -734,18 +626,17 @@ class Console(Cmd):
             error('Unknown arguments.')
             return
 
-        with self.listening_lock:
-            if not self.listening:
-                error('Listener not started.')
-                return
+        if not self.check_thread('listen'):
+            return
 
-        with self.printing_lock:
-            self.printing = True
+        self.console_queue.queue.clear()
+        self.print_thread = PrintThread(Parser(Formats(self.config)))
+        self.print_thread.start()
+        self.parse_thread.forward_to(self.print_thread)
 
+        # Wait for user termination
         self.console_queue.get()
-
-        with self.printing_lock:
-            self.printing = False
+        self.print_thread.stop()
 
     def do_plot(self, args=''):
         '''
@@ -761,10 +652,16 @@ class Console(Cmd):
             error('Unknown arguments.')
             return
 
-        self.plotter_queues['cli'].put('init')
+        if not self.check_thread('listen'):
+            return
 
-        with self.plotting_lock:
-            self.plotting = True
+        if self.check_thread('plot', warn=False):
+            warning('Plot thread already started.')
+            return
+
+        self.plot_thread = PlotThread(self.plotter, self.main_queue)
+        self.plot_thread.start()
+        self.parse_thread.forward_to(self.plot_thread)
 
     def do_predict(self, args=''):
         '''
@@ -781,26 +678,20 @@ class Console(Cmd):
             error('Unknown arguments.')
             return
 
-        with self.listening_lock:
-            if not self.listening:
-                error('Listener not started.')
-                return
+        if not self.check_thread('listen'):
+            return
 
         if not self.model_loaded():
             self.model.load()
             print()
 
-        with self.predicting_lock:
-            self.predicting = True
+        self.predict_thread = PredictThread(self.model)
+        self.predict_thread.start()
+        self.parse_thread.forward_to(self.predict_thread)
 
-        self.predict_thread()
-
+        # Wait for user termination
         self.console_queue.get()
-
-        with self.predicting_lock:
-            self.predicting = False
-
-        self.model_queue.put(None)
+        self.predict_thread.stop()
 
     def do_start(self, args=''):
         '''
@@ -820,7 +711,7 @@ class Console(Cmd):
             self.model.load()
             print()
 
-        self.do_send(self.default_config)
+        self.do_configure()
         self.do_listen()
         self.do_plot()
         self.do_predict()
@@ -936,24 +827,18 @@ class Console(Cmd):
             error('Unknown arguments.')
             return
 
-        with self.listening_lock:
-            if not self.listening:
-                error('Listener not started.')
-                return
-
         if not GESTURE.check(args):
             warning(f'Unknown argument: {args}')
             return
 
+        if not self.check_thread('listen'):
+            return
+
         self.logger.set_gesture(args)
 
-        with self.logging_lock:
-            self.logging = True
-
-        self.logging_thread().join()
-
-        with self.logging_lock:
-            self.logging = False
+        self.log_thread = LogThread(self.logger)
+        self.log_thread.start()
+        self.parse_thread.forward_to(self.log_thread)
 
     def complete_gestures(self, text, line):
         completions = []
@@ -1016,17 +901,14 @@ class Console(Cmd):
             error('Unknown arguments.')
             return
 
-        with self.plotting_lock:
-            if not self.plotting:
-                error('Plotter not started.')
-                return
+        if not self.check_thread('plot'):
+            return
 
         if not GESTURE.check(args):
             warning(f'Unknown argument: {args}')
             return
 
-        self.plotter_queues['cli'].put('redraw')
-        self.plotter_queues['cli'].put(args)
+        self.plot_thread.send_to_main(self.plotter.draw_last_sample, args)
 
     def complete_redraw(self, text, line, begidx, endidx):
         return self.complete_gestures(text, line)
@@ -1038,60 +920,21 @@ def console_thread(console):
         console.cmdloop()
 
 
-def init_plotter(plotter_queues):
+def plotting(q):
     while True:
         try:
-            cmd = plotter_queues['cli'].get(False)
-            if cmd == 'init':
-                plt.close('all')
-                plotter = Plotter(plotter_queues['info'])
-                plotter.show()
-                plt.gcf().canvas.flush_events()
-                return plotter
+            func, args, kwargs = q.get(False)
         except queue.Empty:
-            pass
-        time.sleep(0.05)
+            time.sleep(.01)
+            continue
 
-
-def set_plotter(plotter, command):
-    try:
-        cmd = command.get(False)
-        if cmd == 'close':
-            if plotter is not None:
-                plotter.close()
-            return None
-        elif cmd == 'redraw':
-            gesture = command.get()
-            if plotter is not None:
-                plotter.draw_last_sample(gesture)
-    except queue.Empty:
-        pass
-    return plotter
-
-
-def plotting(plotter_queues):
-    plotter = None
-    while True:
-        if plotter is None:
-            plotter = init_plotter(plotter_queues)
-        else:
-            plotter = set_plotter(plotter, plotter_queues['cli'])
-
-        # Plot data
-        if plotter is not None:
-            try:
-                frame = plotter_queues['data'].get(False)
-                plt.gcf().canvas.flush_events()
-                plotter.plot_detected_objs(frame)
-            except queue.Empty:
-                pass
-
+        func(*args, **kwargs)
         time.sleep(.01)
 
 
 if __name__ == '__main__':
-    plotter_queues = {'data': Queue(), 'cli': Queue(), 'info': Queue()}
-    console_thread(Console(plotter_queues))
+    main_queue = queue.Queue()
+    console_thread(Console(main_queue))
 
-    # Plotter has to be located in the main thread
-    plotting(plotter_queues)
+    # All plotting stuff has to be done in main thread
+    plotting(main_queue)

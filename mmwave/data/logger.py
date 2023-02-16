@@ -8,7 +8,7 @@ import pandas as pd
 from tqdm import tqdm
 
 from mmwave.data.formats import GESTURE
-from mmwave.utils.utility_functions import print
+from mmwave.utils.prints import print
 
 import colorama
 from colorama import Fore

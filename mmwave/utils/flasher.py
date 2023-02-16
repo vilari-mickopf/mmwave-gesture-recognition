@@ -6,7 +6,7 @@ import struct
 
 from tqdm import tqdm
 
-from mmwave.utils.utility_functions import error
+from mmwave.utils.prints import error
 
 import colorama
 from colorama import Fore

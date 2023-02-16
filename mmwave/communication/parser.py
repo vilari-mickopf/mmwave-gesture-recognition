@@ -7,7 +7,7 @@ from pprint import pformat
 
 import pandas as pd
 
-from mmwave.utils.utility_functions import print
+from mmwave.utils.prints import print
 
 import colorama
 from colorama import Fore
@@ -146,6 +146,9 @@ class Parser:
         self.frame_num = header['frame_num']
 
     def len_check(self, received, expected, echo=False):
+        if received is None:
+            return False
+
         if received < expected:
             if echo:
                 print(f'{Fore.RED}ERROR: Corrupted frame.')

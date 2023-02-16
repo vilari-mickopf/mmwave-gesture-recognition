@@ -1,20 +1,15 @@
 #! /usr/bin/env python
 
 import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+
 from abc import ABC, abstractmethod
 
 import numpy as np
 
-#  Disable tensorflow logs
-import logging
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
-
 import tensorflow as tf
-from tensorflow.keras import utils
-from tensorflow.keras import preprocessing
-from tensorflow.keras import layers
-from tensorflow.keras import callbacks
+from tensorflow.keras import utils, preprocessing, layers, callbacks  # type: ignore
+import logging
 
 from mmwave.data.formats import GESTURE
 
@@ -22,30 +17,19 @@ import colorama
 from colorama import Fore
 colorama.init(autoreset=True)
 
-logger = tf.get_logger()
-logger.disabled = True
-logger.setLevel(logging.FATAL)
-
-# Init tf gpu
-def set_tensorflow_config(per_process_gpu_memory_fraction=1):
-    config = tf.compat.v1.ConfigProto()
-    config.gpu_options.per_process_gpu_memory_fraction = per_process_gpu_memory_fraction
-    config.gpu_options.allow_growth=True
-    tf.compat.v1.Session(config=config)
-    tf.compat.v1.RunOptions(report_tensor_allocations_upon_oom = True)
-set_tensorflow_config()
-
 
 class Model(ABC):
     def __init__(self, num_of_frames=50, num_of_objs=65, num_of_data_in_obj=5,
-                 num_of_classes=9):
+                       gesture=GESTURE):
         self.model = None
         self.model_file = os.path.join(os.path.dirname(__file__), '.model')
 
         self.num_of_frames = num_of_frames
         self.num_of_objs = num_of_objs
         self.num_of_data_in_obj = num_of_data_in_obj
-        self.num_of_classes = num_of_classes
+
+        self.gesture = gesture
+        self.num_of_classes = len(gesture)
 
         self.frame_size = self.num_of_objs*self.num_of_data_in_obj
 
@@ -132,12 +116,12 @@ class Model(ABC):
 
         if debug:
             for guess, val in zip(best_guess, best_value):
-                print(f'{Fore.YELLOW}Best guess: {GESTURE(guess).name.lower()}: {val:.2f}')
+                print(f'{Fore.YELLOW}Best guess: {self.gesture(guess).name.lower()}: {val:.2f}')
             print(f'{Fore.CYAN}------------------------------\n')
 
         if best_value[0] >= .9:
             print(f'{Fore.GREEN}Gesture recognized:',
-                  f'{Fore.BLUE}{GESTURE(best_guess[0]).name.lower()}')
+                  f'{Fore.BLUE}{self.gesture(best_guess[0]).name.lower()}')
             print(f'{Fore.CYAN}==============================\n')
 
 

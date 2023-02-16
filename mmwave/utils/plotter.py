@@ -19,22 +19,23 @@ plt.style.use('seaborn-dark')
 
 class Plotter:
     def __init__(self, queue):
-        self.xy = []
-
         self.queue = queue
 
         self.fig = None
         self.ax = None
         self.sc = None
 
-        self.__set_figure()
+        #  self.init()  # Make sure this is started from main thread
 
+    def init(self):
+        plt.close('all')
+        self.set_figure()
         self.background = self.fig.canvas.copy_from_bbox(self.ax.bbox)
         connect = self.fig.canvas.mpl_connect
-        self.draw_cid = connect('draw_event', self.__grab_background)
-        connect('close_event', self.__fig_close)
+        self.draw_cid = connect('draw_event', self.grab_background)
+        connect('close_event', self.fig_close)
 
-    def __set_figure(self):
+    def set_figure(self):
         self.fig, self.ax = plt.subplots()
         self.sc = self.ax.scatter([], [], color='r', picker=10, animated=True)
 
@@ -54,7 +55,7 @@ class Plotter:
         ax_polar.set_yticklabels([])
         self.sc.set_color([1, 0, 0])
 
-    def __grab_background(self, event=None):
+    def grab_background(self, event=None):
         self.sc.set_visible(False)
 
         # Temporarily disconnect the draw_event callback to avoid recursion
@@ -62,26 +63,27 @@ class Plotter:
         canvas.mpl_disconnect(self.draw_cid)
         canvas.draw()
 
-        self.draw_cid = canvas.mpl_connect('draw_event', self.__grab_background)
+        self.draw_cid = canvas.mpl_connect('draw_event', self.grab_background)
         self.background = self.fig.canvas.copy_from_bbox(self.fig.bbox)
         self.sc.set_visible(True)
 
-    def __fig_close(self, event=None):
+    def fig_close(self, event=None):
         self.queue.put('closed')
 
-    def __blit(self):
+    def blit(self):
         self.fig.canvas.restore_region(self.background)
         self.ax.draw_artist(self.sc)
         self.fig.canvas.blit(self.ax.bbox)
 
-    def __update(self):
-        if self.xy == []:
-            self.xy = [None, None]
+    def update(self, points=[]):
+        if points == []:
+            points = [None, None]
 
-        self.sc.set_offsets(self.xy)
-        self.__blit()
+        self.sc.set_offsets(points)
+        self.blit()
+        plt.gcf().canvas.flush_events()
 
-    def __get_previos_data(self, gesture):
+    def get_previos_data(self, gesture):
         last_sample = Logger.get_last_sample(gesture)
         if last_sample[-1] == '/':
             return None
@@ -89,7 +91,7 @@ class Plotter:
         df = pd.read_csv(last_sample).reset_index().values
 
         num_of_frames = df[-1][1]+1
-        points = [[] for i in range(num_of_frames)]
+        points = [[] for _ in range(num_of_frames)]
         for row in df:
             if row[2] == 'None' or row[3] == 'None':
                 points[row[1]].append((None, None))
@@ -108,30 +110,22 @@ class Plotter:
         return points
 
     def draw_last_sample(self, gesture):
-        self.sc.set_color([0.5, 0.5, 0.5])
-        last_sample = self.__get_previos_data(gesture)
+        self.sc.set_color([.5, .5, .5])
+        last_sample = self.get_previos_data(gesture)
         print('Redrawing...')
 
-        self.xy = []
-        self.__update()
-
+        self.update()
         for frame in last_sample:
-            self.xy = []
-            for x, y in frame:
-                self.xy.append([x, y])
-
-            self.__update()
-            time.sleep(0.03)
+            self.update([[x, y] for x, y in frame])
+            time.sleep(.03)
 
         print('Done')
 
-        self.xy = []
-        self.__update()
+        self.update()
         self.sc.set_color([1, 0, 0])
 
     def plot_detected_objs(self, frame):
-        self.xy = []
-
+        points = []
         if (frame is not None and
                 frame.get('tlvs') is not None and
                 frame['tlvs'].get(1) is not None):
@@ -152,14 +146,14 @@ class Plotter:
                 x = x/desc['xyz_q_format']
                 y = y/desc['xyz_q_format']
 
-                self.xy.append([x, y])
+                points.append([x, y])
 
-        self.__update()
+        self.update(points)
 
     def show(self):
         plt.gcf().canvas.flush_events()
         plt.show(block=False)
-        time.sleep(1)
+        plt.gcf().canvas.flush_events()
 
     def close(self):
         plt.close()
