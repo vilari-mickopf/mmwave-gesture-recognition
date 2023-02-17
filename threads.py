@@ -66,8 +66,8 @@ class Thread(ABC, threading.Thread):
 
     def run(self):
         while True:
-            for t in self.depends:
-                if not t.is_alive():
+            for thread in self.depends:
+                if not thread.is_alive():
                     self.stop()
 
             if self.stop_event.is_set():
@@ -88,7 +88,7 @@ class ListenThread(Thread):
     def process(self):
         data = self.mmwave.get_data()
         self.forward(data)
-        time.sleep(.1)
+        time.sleep(.01)
 
 
 class ParseThread(Thread):
@@ -106,8 +106,8 @@ class ParseThread(Thread):
             if not frame:
                 continue
 
-            f = self.parser.parse(self.parser.formats.MAGIC_NUMBER+frame, warn=True)
-            self.forward(f)
+            frame = self.parser.parse(self.parser.formats.MAGIC_NUMBER + frame, warn=True)
+            self.forward(frame)
 
 
 class PrintThread(Thread):

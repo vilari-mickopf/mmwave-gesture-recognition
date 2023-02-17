@@ -7,7 +7,6 @@ import readline
 import binascii
 import queue
 import serial
-import time
 
 from cmd import Cmd
 
@@ -26,9 +25,7 @@ import colorama
 from colorama import Fore
 colorama.init(autoreset=True)
 
-from completer import Completer
-from handlers import SignalHandler
-
+from handlers import SignalHandler, Completer
 from threads import threaded, ListenThread, ParseThread, PrintThread
 from threads import LogThread, PredictThread, PlotThread
 
@@ -537,10 +534,11 @@ class Console(Cmd):
         '''
         Start listener and parser thread
 
-        Starting listener on connected ports. If mmWave is not configured,
-        default configuration will be send first.
+        Starting listener on connected ports. mmWave should be configured
+        before using this option.
 
-        Look \'connect\' and \'autoconnect\' command for connecting to mmWave.
+        Look 'connect' and 'autoconnect' command for connecting to mmWave.
+        Look 'configure' command for connecting to mmWave.
 
         Usage:
         >> listen
@@ -922,14 +920,8 @@ def console_thread(console):
 
 def plotting(q):
     while True:
-        try:
-            func, args, kwargs = q.get(False)
-        except queue.Empty:
-            time.sleep(.01)
-            continue
-
+        func, args, kwargs = q.get()
         func(*args, **kwargs)
-        time.sleep(.01)
 
 
 if __name__ == '__main__':
