@@ -95,10 +95,9 @@ class Flasher:
         if get_status:
             self.send_packet(CMD(OPCODE.GET_STATUS))
 
-        response = ''
         if resp:
-            response = self.get_response()
-        return response
+            return self.get_response()
+        return ''
 
     def get_response(self):
         header = self.connection.read(3)
@@ -135,7 +134,7 @@ class Flasher:
                 break
 
             response = self.connection.read(1)
-            time.sleep(0.01)
+            time.sleep(.01)
 
         self.start_time = 0
 

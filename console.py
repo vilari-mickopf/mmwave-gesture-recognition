@@ -34,6 +34,7 @@ class Console(Cmd):
     def __init__(self, main_queue):
         super().__init__()
 
+        # Flash
         self.firmware_dir = os.path.join(os.path.dirname(__file__), 'firmware')
         self.flasher = None
 
@@ -54,14 +55,12 @@ class Console(Cmd):
         self.config = None
         self.parser = None
 
+        # Data logger
         self.logger = Logger()
 
+        # Model
         self.model_type = 'lstm'
         self.set_model(self.model_type)
-
-        # Catching signals
-        self.console_queue = queue.Queue()
-        SignalHandler(self.console_queue)
 
         # Threading stuff
         self.main_queue = main_queue
@@ -74,6 +73,10 @@ class Console(Cmd):
         self.plot_thread = None
         self.log_thread = None
         self.predict_thread = None
+
+        # Catching signals (ctrl-c)
+        self.console_queue = queue.Queue()
+        SignalHandler(self.console_queue)
 
         self.set_prompt()
         print(f'{Fore.GREEN}Init done.\n')
@@ -109,10 +112,7 @@ class Console(Cmd):
             if platform.system() == 'Windows':
                 ports.sort(reverse=True)
 
-            cli_port = ports[0]
-            data_port = ports[1]
-
-        self.mmwave = mmWave(cli_port, data_port,
+        self.mmwave = mmWave(ports[0], ports[1],
                              cli_rate=cli_rate,
                              data_rate=data_rate)
         self.mmwave.connect()
@@ -217,9 +217,6 @@ class Console(Cmd):
 
     def do_history(self, args):
         '''Print a list of commands that have been entered'''
-        if args != '':
-            error('Unknown arguments.')
-            return
         print(self._hist)
 
     def do_exit(self, args):
@@ -293,9 +290,8 @@ class Console(Cmd):
         return [s[offs:] for s in complete_list if s.startswith(mline)]
 
     def complete_flash(self, text, line, begidx, endidx):
-        completions = []
-        for file in glob.glob(os.path.join(self.firmware_dir, '*.bin')):
-            completions.append(os.path.basename(file))
+        bins = os.path.join(self.firmware_dir, '*.bin')
+        completions = [os.path.basename(f) for f in glob.glob(bins)]
 
         return self.complete_from_list(completions, text, line)
 
