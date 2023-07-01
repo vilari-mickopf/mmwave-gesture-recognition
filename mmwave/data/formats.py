@@ -1,16 +1,13 @@
-#! /usr/bin/env python
-
-from enum import Enum, auto
+#!/usr/bin/env python
 
 import os
 import re
-from itertools import count
-
 from copy import deepcopy
+from itertools import count
+from enum import Enum, EnumMeta, auto
 
 
 class Formats:
-
     MAGIC_NUMBER = b'\x02\x01\x04\x03\x06\x05\x08\x07'
 
     PROFILE_CFG_FORMAT = {
@@ -20,16 +17,19 @@ class Formats:
         'channelCfg': {
             'rxAntBitmap': int,
             'txAntBitmap': int,
-            'cascading': int},
+            'cascading': int
+        },
         'adcCfg': {
             'numADCBits': int,
-            'adcOutputFmt': int},
+            'adcOutputFmt': int
+        },
         'adcbufCfg': {
             'subFrameIdx': int,
             'adcOutputFmt': int,
             'SampleSwap': int,
             'chanInterleave': int,
-            'chirpThreshold': int},
+            'chirpThreshold': int
+        },
         'profileCfg': {
             'profileId': int,
             'startFreq': float,
@@ -44,7 +44,8 @@ class Formats:
             'digOutSampleRate': int,
             'hpfCornerFreq1': int,
             'hpfCornerFreq2': int,
-            'rxGain': int},
+            'rxGain': int
+        },
         'chirpCfg': {
             'chirpStartIdx': int,
             'chirpEndIdx': int,
@@ -53,7 +54,8 @@ class Formats:
             'freqSlopeVar': float,
             'idleTimeVar': float,
             'adcStartTimeVar': float,
-            'txAntBitmask': int},
+            'txAntBitmask': int
+        },
         'frameCfg': {
             'chirpStartIdx': int,
             'chirpEndIdx': int,
@@ -61,10 +63,12 @@ class Formats:
             'nFrames': int,
             'framePeriod': float,
             'triggerSelect': int,
-            'triggerDelay': float},
+            'triggerDelay': float
+        },
         'lowPower': {
             'subFrameIdx': int,
-            'adcMode': int},
+            'adcMode': int
+        },
         'guiMonitor': {
             'subFrameIdx': int,
             'detectedObjects': int,
@@ -72,7 +76,8 @@ class Formats:
             'noiseProfile': int,
             'rangeAzimuthHeatMap': int,
             'rangeDopplerHeatMap': int,
-            'statsInfo': int},
+            'statsInfo': int
+        },
         'cfarCfg': {
             'subFrameIdx': int,
             'procDirection': int,
@@ -81,45 +86,54 @@ class Formats:
             'guardLen': int,
             'noiseDiv': int,
             'cyclicMode': int,
-            'thresholdScale': int},
+            'thresholdScale': int
+        },
         'peakGrouping': {
             'subFrameIdx': int,
             'groupingMode': int,
             'rangeDimEn': int,
             'dopplerDimEn': int,
             'startRangeIdx': int,
-            'endRangeIdx': int},
+            'endRangeIdx': int
+        },
         'multiObjBeamForming': {
             'subFrameIdx': int,
             'enabled': int,
-            'threshold': float},
+            'threshold': float
+        },
         'clutterRemoval': {
             'subFrameIdx': int,
-            'enabled': int},
+            'enabled': int
+        },
         'calibDcRangeSig': {
             'subFrameIdx': int,
             'enabled': int,
             'negativeBinIdx': int,
             'positiveBinIdx': int,
-            'numAvgFrames': int},
+            'numAvgFrames': int
+        },
         'extendedMaxVelocity': {
             'subFrameIdx': int,
-            'enabled': int},
+            'enabled': int
+        },
         'bpmCfg': {
             'subFrameIdx': int,
             'isEnabled': int,
             'chirp0Idx': int,
-            'chirp1Idx': int},
+            'chirp1Idx': int
+        },
         'lvdsStreamCfg': {
             'subFrameIdx': int,
             'isHeaderEnabled ': int,
             'dataFmt': int,
-            'isSwEnabled': int},
+            'isSwEnabled': int
+        },
         'nearFieldCfg': {
             'subFrameIdx': int,
             'enabled': int,
             'startRangeIndex': int,
-            'endRangeIndex': int},
+            'endRangeIndex': int
+        },
         'compRangeBiasAndRxChanPhase': {
             'rangeBias': float,
             'Re00': float,
@@ -137,78 +151,82 @@ class Formats:
             'Re12': float,
             'Im12': float,
             'Re13': float,
-            'Im13': float},
+            'Im13': float
+        },
         'measureRangeBiasAndRxChanPhase': {
             'enabled': int,
             'targetDistance': float,
-            'searchWin': float},
+            'searchWin': float
+        },
         'CQRxSatMonitor': {
             'profileIndx': int,
             'satMonSel': int,
             'primarySliceDuration': int,
             'numSlices': int,
-            'rxChannelMask': int},
+            'rxChannelMask': int
+        },
         'CQSigImgMonitor': {
             'profileIndx': int,
             'numSlices': int,
-            'timeSliceNumSamples': int},
+            'timeSliceNumSamples': int
+        },
         'analogMonitor': {
             'rxSatMonEn ': int,
-            'sigImgMonEn ': int}
+            'sigImgMonEn ': int
+        }
     }
 
     HEADER_FORMAT = {
-        'name': 'header',
-        'values': {
-            'magic': '8s',
-            'version': '4s',
-            'packet_len': 'I',
-            'platform': '4s',
-            'frame_num': 'I',
-            'time_cpu_cyc': 'I',
-            'num_det_obj': 'I',
-            'num_tlvs': 'I',
-            'unknown': 'I'}
+        'magic': '8s',
+        'version': '4s',
+        'packet_len': 'I',
+        'platform': '4s',
+        'frame_num': 'I',
+        'time_cpu_cyc': 'I',
+        'num_det_obj': 'I',
+        'num_tlvs': 'I',
+        'unknown': 'I'
     }
 
     TLVS_FORMAT = {
-        1: {'name': 'detectedPoints',
-            'values': {
-                'descriptor': {
-                    'num_det_obj': 'H',
-                    'xyz_q_format': 'H'},
-                'objs': ['descriptor.num_det_obj', {
+        'detectedPoints': {
+            'descriptor': {
+                'num_det_obj': 'H',
+                'xyz_q_format': 'H'
+            },
+            'objs': [
+                'descriptor.num_det_obj',
+                 {
                     'range_idx': 'H',
                     'doppler_idx': 'H',
                     'peak_value': 'H',
                     'x_coord': 'H',
                     'y_coord': 'H',
-                    'z_coord': 'H'}]}},
-        2: {'name': 'rangeProfile',
-            'values': '%sf'},
-        3: {'name': 'noiseProfile',
-            'values': '%sf'},
-        4: {'name': 'rangeAzimuthHeatMap',
-            'values': '%sf'},
-        5: {'name': 'rangeDoplerHeatMap',
-            'values': '%sf'},
-        6: {'name': 'stats',
-            'values': {
-                'Inter-frame Processing Time': 'I',
-                'Transmit Output Time': 'I',
-                'Inter-frame Processing Margin': 'I',
-                'Inter-chirp Processing Margin': 'I',
-                'Active Frame CPU Load': 'I',
-                'InterframeCPU Load': 'I'}}
+                    'z_coord': 'H'
+                }
+            ]
+        },
+        'rangeProfile': '%sf',
+        'noiseProfile': '%sf',
+        'rangeAzimuthHeatMap': '%sf',
+        'rangeDopplerHeatMap': '%sf',
+        'stats': {
+            'Inter-frame Processing Time': 'I',
+            'Transmit Output Time': 'I',
+            'Inter-frame Processing Margin': 'I',
+            'Inter-chirp Processing Margin': 'I',
+            'Active Frame CPU Load': 'I',
+            'InterframeCPU Load': 'I'
+        }
     }
 
     def __init__(self, config):
-        self.config = self.parse_config(config)
+        self.config = self.parse(config)
 
         self.header = self.config_header()
         self.tlvs = self.config_tlvs()
 
-    def parse_config(self, config_file):
+    def parse(self, config_file):
         format = self.PROFILE_CFG_FORMAT
 
         with open(config_file, 'r') as f:
@@ -251,24 +269,43 @@ class Formats:
                 break
 
         # Size: RangeBins
-        format[2]['values'] %= str(adc_samples)
+        format['rangeProfile'] %= str(adc_samples)
         # Size: RangeBins
-        format[3]['values'] %= str(adc_samples)
+        format['noiseProfile'] %= str(adc_samples)
 
         # Size: RangeBins * num_virtual_antennas
         num_rx = bin(self.config['channelCfg']['rxAntBitmap']).count('1')
         num_tx = bin(self.config['channelCfg']['txAntBitmap']).count('1')
-        format[4]['values'] %= str(adc_samples*num_rx*num_tx)
+        format['rangeAzimuthHeatMap'] %= str(adc_samples*num_rx*num_tx)
 
         # Size: RangeBins * DopplerBins
         chirps_per_frame = (self.config['frameCfg']['chirpEndIdx'] -
                             self.config['frameCfg']['chirpStartIdx'])
-        format[5]['values'] %= str(adc_samples*chirps_per_frame//num_tx)
+        format['rangeDopplerHeatMap'] %= str(adc_samples*chirps_per_frame//num_tx)
 
         return format
 
 
-class GESTURE(Enum):
+class GESTURE_META(EnumMeta):
+    def __getitem__(self, index_or_name):
+        if isinstance(index_or_name, str):
+            return super().__getitem__(index_or_name.upper()).value
+
+        elif isinstance(index_or_name, int) and index_or_name < super().__len__():
+            return list(self)[index_or_name].name
+
+    def __contains__(cls, index_or_name):
+        if isinstance(index_or_name, cls):
+            return True
+
+        if isinstance(index_or_name, str):
+            return index_or_name.upper() in cls.__members__.keys()
+
+        elif isinstance(index_or_name, int):
+            return index_or_name in [v.value for v in cls.__members__.values()]
+
+
+class GESTURE(Enum, metaclass=GESTURE_META):
     UP = 0
     DOWN = auto()
     LEFT = auto()
@@ -279,12 +316,32 @@ class GESTURE(Enum):
     S = auto()
     X = auto()
 
-    @staticmethod
-    def check(name):
-        for gesture in GESTURE:
-            if name.upper() == gesture.name:
-                return True
-        return False
+    @property
+    def dir(self):
+        return getattr(self, '_dir', os.path.join(os.path.dirname(__file__)))
 
-    def get_dir(self):
-        return os.path.join(os.path.dirname(__file__), self.name.lower())
+    @dir.setter
+    def dir(self, path):
+        self._dir = path
+
+    def last_file(self):
+        save_dir = os.path(self.dir, self.name)
+        if os.listdir(save_dir) == []:
+            return
+
+        nums = []
+        for f in os.listdir(save_dir):
+            num = os.path.splitext(f)[0].split('_')[1]
+            nums.append(int(num))
+        last_sample = f'sample_{str(max(nums))}.npz'
+        return os.path.join(save_dir, last_sample)
+
+    def next_file(self):
+        last_sample = self.last_file()
+        if last_sample is None:
+            return os.path.join(last_sample, 'sample_1.npz')
+
+        save_dir = os.path.dirname(last_sample)
+        last_sample_name = os.path.splitext(last_sample)[0]
+        num = int(os.path.basename(last_sample_name).split('_')[1]) + 1
+        return os.path.join(save_dir, f'sample_{str(num)}.npz')

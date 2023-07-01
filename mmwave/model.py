@@ -1,4 +1,4 @@
-#! /usr/bin/env python
+#!/usr/bin/env python
 
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
@@ -9,7 +9,6 @@ import numpy as np
 
 import tensorflow as tf
 from tensorflow.keras import utils, preprocessing, layers, callbacks  # type: ignore
-import logging
 
 from mmwave.data.formats import GESTURE
 
@@ -19,10 +18,10 @@ colorama.init(autoreset=True)
 
 
 class Model(ABC):
-    def __init__(self, num_of_frames=50, num_of_objs=65, num_of_data_in_obj=5,
-                       gesture=GESTURE):
+    def __init__(self, num_of_frames=50, num_of_objs=65, num_of_data_in_obj=5, gesture=GESTURE):
         self.model = None
-        self.model_file = os.path.join(os.path.dirname(__file__), '.model')
+        self.model_file = os.path.join(os.path.dirname(__file__),
+                                       f'.{self.__class__.__name__}')
 
         self.num_of_frames = num_of_frames
         self.num_of_objs = num_of_objs
@@ -33,7 +32,7 @@ class Model(ABC):
 
         self.frame_size = self.num_of_objs*self.num_of_data_in_obj
 
-    def __padd_data(self, data):
+    def padd_data(self, data):
         padded_data = []
 
         # Pad objects
@@ -56,9 +55,9 @@ class Model(ABC):
 
         return np.asarray(padded_data)
 
-    def __prep_data(self, X, y=None):
+    def prep_data(self, X, y=None):
         # X has been already normalized while importing the data from .csv files
-        X = self.__padd_data(X)
+        X = self.padd_data(X)
         X = X.reshape((len(X), self.num_of_frames, self.frame_size))
 
         if y is not None:
@@ -72,8 +71,8 @@ class Model(ABC):
         pass
 
     def train(self, X_train, y_train, X_val, y_val):
-        X_train, y_train = self.__prep_data(X_train, y_train)
-        X_val, y_val = self.__prep_data(X_val, y_val)
+        X_train, y_train = self.prep_data(X_train, y_train)
+        X_val, y_val = self.prep_data(X_val, y_val)
 
         self.create_model()
         self.model.summary()
@@ -95,22 +94,27 @@ class Model(ABC):
         self.model = tf.keras.models.load_model(self.model_file)
         print(f'{Fore.GREEN}Done.')
 
-    def evaluate(self, X, y):
-        if self.model is None:
-            print(f'{Fore.RED}Model not created.')
-            return
+    def loaded(self):
+        return self.model is not None
 
-        X, y = self.__prep_data(X, y)
+    def check_model(func):
+        def wrapper(self, *args, **kwargs):
+            if self.model is None:
+                print(f'{Fore.RED}Model not created.')
+                return
+            return func(self, *args, **kwargs)
+        return wrapper
+
+    @check_model
+    def evaluate(self, X, y):
+        X, y = self.prep_data(X, y)
         preds = self.model.evaluate(X, y)
         print(f'Loss: {round(preds[0], 4)}', end=' ')
         print(f'Acc: {round(preds[1], 4)}')
 
+    @check_model
     def predict(self, X, debug=False):
-        if self.model is None:
-            print(f'{Fore.RED}Model not created.')
-            return
-
-        y_pred = self.model.predict(self.__prep_data(X))
+        y_pred = self.model.predict(self.prep_data(X))
         best_guess = [y_pred[0].tolist().index(x) for x in sorted(y_pred[0], reverse=True)]
         best_value = sorted(y_pred[0], reverse=True)
 
@@ -128,7 +132,6 @@ class Model(ABC):
 class ConvModel(Model):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.model_file = os.path.join(os.path.dirname(__file__), '.conv_model')
 
     def create_model(self):
         self.model = tf.keras.Sequential([
@@ -165,10 +168,6 @@ class ConvModel(Model):
 
 
 class LstmModel(Model):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.model_file = os.path.join(os.path.dirname(__file__), '.lstm_model')
-
     def create_model(self):
         self.model = tf.keras.Sequential([
             layers.InputLayer(input_shape=(self.num_of_frames, self.frame_size)),
@@ -186,10 +185,6 @@ class LstmModel(Model):
 
 
 class TransModel(Model):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.model_file = os.path.join(os.path.dirname(__file__), '.trans_model')
-
     def create_model(self):
         inputs = layers.Input(shape=(self.num_of_frames, self.frame_size))
 

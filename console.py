@@ -1,4 +1,4 @@
-#! /usr/bin/env python
+#!/usr/bin/env python
 
 import glob
 import os
@@ -21,13 +21,13 @@ from mmwave.utils.plotter import Plotter
 from mmwave.utils.prints import print, error, warning
 from mmwave.utils.flasher import Flasher, CMD, OPCODE
 
-import colorama
-from colorama import Fore
-colorama.init(autoreset=True)
-
 from handlers import SignalHandler, Completer
 from threads import threaded, ListenThread, ParseThread, PrintThread
 from threads import LogThread, PredictThread, PlotThread
+
+import colorama
+from colorama import Fore
+colorama.init(autoreset=True)
 
 
 class Console(Cmd):
@@ -44,6 +44,7 @@ class Console(Cmd):
         self.mmwave_init(cli_port=None, data_port=None,
                          cli_rate=self.default_cli_rate,
                          data_rate=self.default_data_rate)
+
         if self.mmwave is None or self.mmwave.connected() is False:
             print('Try connecting manually. Type \'help connect\' for more info.\n')
 
@@ -57,10 +58,10 @@ class Console(Cmd):
 
         # Data logger
         self.logger = Logger()
+        self.data_dir = None
 
         # Model
-        self.model_type = 'lstm'
-        self.set_model(self.model_type)
+        self.model = 'lstm'
 
         # Threading stuff
         self.main_queue = main_queue
@@ -82,6 +83,21 @@ class Console(Cmd):
         print(f'{Fore.GREEN}Init done.\n')
         print(f'{Fore.MAGENTA}--- mmWave console ---')
         warning('Type \'help\' for more information.')
+
+    @property
+    def model(self):
+        return self._model
+
+    @model.setter
+    def model(self, model):
+        if model == 'conv':
+            self._model = ConvModel()
+        elif model == 'lstm':
+            self._model = LstmModel()
+        elif model == 'trans':
+            self._model = TransModel()
+        else:
+            raise NotImplemented(model)
 
     @property
     def configured(self):
@@ -119,24 +135,13 @@ class Console(Cmd):
         if self.mmwave.connected():
             self.flasher = Flasher(self.mmwave.cli_port)
 
-    def is_connected(self):
-        if self.mmwave is None or not self.mmwave.connected():
-            return False
-        return True
+    def connected(self):
+        return self.mmwave is not None and self.mmwave.connected()
 
     def set_prompt(self):
-        if self.is_connected():
+        self.prompt = f'{Fore.RED}[Not connected]{Fore.RESET} >> '
+        if self.connected():
             self.prompt = f'{Fore.GREEN}>>{Fore.RESET} '
-        else:
-            self.prompt = f'{Fore.RED}[Not connected]{Fore.RESET} >> '
-
-    def set_model(self, model_type):
-        if model_type == 'conv':
-            self.model = ConvModel()
-        elif model_type == 'lstm':
-            self.model = LstmModel()
-        elif model_type == 'trans':
-            self.model = TransModel()
 
     def preloop(self):
         '''
@@ -158,7 +163,21 @@ class Console(Cmd):
         Cmd.postloop(self)   # Clean up command completion
         print('Exiting...')
 
-    def check_plotter(self):
+    def check_thread(self, name):
+        thread = getattr(self, f'{name}_thread')
+        return thread is not None and thread.is_alive()
+
+    def if_thread_running(name):
+        def arg_wrapper(func):
+            def func_wrapper(self, *args, **kwargs):
+                if not self.check_thread(name):
+                    error(f'{name} thread not started.')
+                    return
+                return func(self, *args, **kwargs)
+            return func_wrapper
+        return arg_wrapper
+
+    def update_plotter(self):
         try:
             info = self.plotter_queue.get(False)
         except queue.Empty:
@@ -166,7 +185,7 @@ class Console(Cmd):
 
         if info == 'closed':
             print(f'{Fore.YELLOW}Plotter closed.\n')
-            if self.check_thread('plot', warn=False):
+            if self.check_thread('plot'):
                 self.plot_thread.stop()
 
     def precmd(self, line):
@@ -176,7 +195,7 @@ class Console(Cmd):
         before execution (for example, variable substitution) do it here.
         '''
         self._hist += [line.strip()]
-        self.check_plotter()
+        self.update_plotter()
 
         return line
 
@@ -219,20 +238,52 @@ class Console(Cmd):
         '''Print a list of commands that have been entered'''
         print(self._hist)
 
+    def complete_from_list(self, complete_list, text, line):
+        mline = line.partition(' ')[2]
+        offs = len(mline) - len(text)
+        return [s[offs:] for s in complete_list if s.startswith(mline)]
+
+    def if_connected(fn):
+        def wrapper(self, *args, **kwargs):
+            if self.connected():
+                return fn(self, *args, **kwargs)
+            error('Not connected.')
+        return wrapper
+
+    def argcheck(min=0, max=0):
+        def arg_wrapper(func):
+            def func_wrapper(self, *args, **kwargs):
+                assert min <= max
+
+                if len(args) == 0:
+                    args = ('', )
+
+                if args[0] != '' and min == 0 and max == 0:
+                    error('Unknown arguments.')
+                    return
+
+                if args[0] == '' and min != 0:
+                    error('Too few arguments.')
+                    return
+
+                if len(args[0].split()) > max:
+                    error('Too many arguments.')
+                    return
+
+                return func(self, *args, **kwargs)
+            return func_wrapper
+        return arg_wrapper
+
+    @argcheck()
     def do_exit(self, args):
         '''Exits from the console'''
-
-        if args != '':
-            error('Unknown arguments.')
-            return
-
         self.do_stop()
-
-        if self.is_connected():
+        if self.connected():
             self.mmwave.disconnect()
-
         os._exit(0)
 
+    @if_connected
+    @argcheck(min=1, max=4)
     def do_flash(self, args=''):
         '''
         Sending .bin files to mmWave
@@ -246,13 +297,6 @@ class Console(Cmd):
         Usage:
         >> flash xwr16xx_mmw_demo.bin
         '''
-        if len(args.split()) > 4:
-            error('Too many arguments.')
-            return
-
-        if args == '':
-            error('Too few arguments.')
-            return
 
         filepaths = []
         for arg in args.split():
@@ -261,10 +305,6 @@ class Console(Cmd):
                 error(f'File \'{filepath}\' doesn\'t exist.')
                 return
             filepaths.append(filepath)
-
-        if not self.is_connected():
-            error('Not connected.')
-            return
 
         print('Ping mmWave...', end='')
         response = self.flasher.send_cmd(CMD(OPCODE.PING), resp=False)
@@ -284,17 +324,13 @@ class Console(Cmd):
         self.flasher.flash(filepaths, erase=True)
         print(f'{Fore.GREEN}Done.')
 
-    def complete_from_list(self, complete_list, text, line):
-        mline = line.partition(' ')[2]
-        offs = len(mline) - len(text)
-        return [s[offs:] for s in complete_list if s.startswith(mline)]
-
     def complete_flash(self, text, line, begidx, endidx):
         bins = os.path.join(self.firmware_dir, '*.bin')
         completions = [os.path.basename(f) for f in glob.glob(bins)]
 
         return self.complete_from_list(completions, text, line)
 
+    @argcheck()
     def do_autoconnect(self, args=''):
         '''
         Auto connecting to mmWave
@@ -308,11 +344,7 @@ class Console(Cmd):
         Usage:
         >> autoconnect
         '''
-        if args != '':
-            error('Unknown arguments.')
-            return
-
-        if self.is_connected():
+        if self.connected():
             warning('Already connected.')
             print('Reconnecting...')
 
@@ -341,7 +373,7 @@ class Console(Cmd):
                 error(f'Port {port} is not valid.')
                 warning('Valid ports:')
                 for port in ports:
-                    warning('\t' + port)
+                    warning(f'\t{port}')
                 warning('Type \'exit\' to return.')
                 port = None
 
@@ -374,9 +406,7 @@ class Console(Cmd):
         readline.set_completer(old_completer)
         return rate
 
-    def model_loaded(self):
-        return self.model.model is not None
-
+    @argcheck()
     def do_connect(self, args=''):
         '''
         Manually connecting to mmWave
@@ -399,11 +429,7 @@ class Console(Cmd):
         data rate: 921600
         '''
 
-        if args != '':
-            error('Unknown arguments.')
-            return
-
-        if self.is_connected():
+        if self.connected():
             self.mmwave.disconnect()
             print()
 
@@ -418,6 +444,8 @@ class Console(Cmd):
 
         self.mmwave_init(**ports)
 
+    @if_connected
+    @argcheck(max=1)
     def do_configure(self, args=''):
         '''
         Sending configuration to mmWave
@@ -435,14 +463,6 @@ class Console(Cmd):
         '''
         if args == '':
             args = self.default_config
-
-        if len(args.split()) > 1:
-            error('Too many arguments.')
-            return
-
-        if not self.is_connected():
-            error('Not connected.')
-            return
 
         config = os.path.join(self.config_dir, f'{args}.cfg')
         if config not in glob.glob(os.path.join(self.config_dir, '*.cfg')):
@@ -462,8 +482,8 @@ class Console(Cmd):
             return
         elif os.path.basename(config) == 'stop.cfg':
             self.configured = False
-            if self.check_thread('listen', warn=True):
-                warning('Stopping listener.')
+            if self.check_thread('listen'):
+                warning('Listen thread alredy started. Stopping...')
                 self.listen_thread.stop()
 
         self.config = config
@@ -476,6 +496,7 @@ class Console(Cmd):
 
         return self.complete_from_list(completions, text, line)
 
+    @argcheck(min=1, max=1)
     def do_set_model(self, args=''):
         '''
         Set model type used for prediction. Available models are
@@ -488,20 +509,16 @@ class Console(Cmd):
         >> set_model trans
         '''
 
-        if len(args.split()) > 1:
-            error('Too many arguments.')
-            return
-
         if args not in ['conv', 'lstm', 'trans']:
             warning(f'Unknown argument: {args}')
             return
 
-        self.model_type = args
-        self.set_model(args)
+        self.model = args
 
     def complete_set_model(self, text, line, begidx, endidx):
         return self.complete_from_list(['conv', 'lstm', 'trans'], text, line)
 
+    @argcheck()
     def do_get_model(self, args=''):
         '''
         Get current model type.
@@ -510,22 +527,9 @@ class Console(Cmd):
         >> get_model
         '''
 
-        if args != '':
-            error('Unknown arguments.')
-            return
+        print(f'Current model type: {self.model}')
 
-        print(f'Current model type: {self.model_type}')
-
-    def check_thread(self, name, warn=True):
-        thread = getattr(self, f'{name}_thread')
-        if thread is not None and thread.is_alive():
-            return True
-
-        if warn:
-            warning(f'{name} thread not started.')
-
-        return False
-
+    @argcheck()
     def do_listen(self, args=''):
         '''
         Start listener and parser thread
@@ -539,21 +543,17 @@ class Console(Cmd):
         Usage:
         >> listen
         '''
-        if args != '':
-            error('Unknown arguments.')
-            return
-
         if not self.configured:
             warning('mmWave not configured.')
             return
 
-        if self.check_thread('listen', warn=False):
+        if self.check_thread('listen'):
             warning('listen thread already started.')
             return
 
         print(f'{Fore.CYAN}=== Listening ===')
         self.listen_thread = ListenThread(self.mmwave)
-        self.parse_thread = ParseThread(Parser(Formats(self.config)))
+        self.parse_thread = ParseThread(self.parser)
         self.parse_thread.start()
         self.listen_thread.start()
         self.listen_thread.forward_to(self.parse_thread)
@@ -582,14 +582,14 @@ class Console(Cmd):
             opts = args.split()
 
         if 'plot' in opts:
-            if self.check_thread('plot', warn=False):
+            if self.check_thread('plot'):
                 self.plot_thread.stop()
                 print('Plotter stopped.')
                 self.plot_thread.send_to_main(self.plotter.close)
             opts.remove('plot')
 
         if 'listen' in opts:
-            if self.check_thread('listen', warn=False):
+            if self.check_thread('listen'):
                 self.listen_thread.stop()
                 print('Listener stopped.')
             opts.remove('listen')
@@ -597,7 +597,7 @@ class Console(Cmd):
         if 'mmwave' in opts:
             if self.configured:
                 self.do_configure('stop')
-            print('mmWave stopped.')
+                print('mmWave stopped.')
             opts.remove('mmwave')
 
         for opt in opts:
@@ -606,6 +606,8 @@ class Console(Cmd):
     def complete_stop(self, text, line, begidx, endidx):
         return self.complete_from_list(['mmwave', 'listen', 'plot'], text, line)
 
+    @argcheck()
+    @if_thread_running('listen')
     def do_print(self, args=''):
         '''
         Pretty print
@@ -616,15 +618,9 @@ class Console(Cmd):
         Usage:
         >> print
         '''
-        if args != '':
-            error('Unknown arguments.')
-            return
-
-        if not self.check_thread('listen'):
-            return
 
         self.console_queue.queue.clear()
-        self.print_thread = PrintThread(Parser(Formats(self.config)))
+        self.print_thread = PrintThread(self.parser)
         self.print_thread.start()
         self.parse_thread.forward_to(self.print_thread)
 
@@ -632,6 +628,8 @@ class Console(Cmd):
         self.console_queue.get()
         self.print_thread.stop()
 
+    @argcheck()
+    @if_thread_running('listen')
     def do_plot(self, args=''):
         '''
         Start plotter
@@ -642,14 +640,8 @@ class Console(Cmd):
         Usage:
         >> plot
         '''
-        if args != '':
-            error('Unknown arguments.')
-            return
 
-        if not self.check_thread('listen'):
-            return
-
-        if self.check_thread('plot', warn=False):
+        if self.check_thread('plot'):
             warning('Plot thread already started.')
             return
 
@@ -657,6 +649,8 @@ class Console(Cmd):
         self.plot_thread.start()
         self.parse_thread.forward_to(self.plot_thread)
 
+    @argcheck()
+    @if_thread_running('listen')
     def do_predict(self, args=''):
         '''
         Start prediction
@@ -668,14 +662,8 @@ class Console(Cmd):
         Usage:
         >> predict
         '''
-        if args != '':
-            error('Unknown arguments.')
-            return
 
-        if not self.check_thread('listen'):
-            return
-
-        if not self.model_loaded():
+        if not self.model.loaded():
             self.model.load()
             print()
 
@@ -683,10 +671,7 @@ class Console(Cmd):
         self.predict_thread.start()
         self.parse_thread.forward_to(self.predict_thread)
 
-        # Wait for user termination
-        self.console_queue.get()
-        self.predict_thread.stop()
-
+    @argcheck()
     def do_start(self, args=''):
         '''
         Start listener, plotter and prediction.
@@ -697,11 +682,8 @@ class Console(Cmd):
         Usage:
         >> start
         '''
-        if args != '':
-            error('Unknown arguments.')
-            return
 
-        if not self.model_loaded():
+        if not self.model.loaded():
             self.model.load()
             print()
 
@@ -709,78 +691,46 @@ class Console(Cmd):
         self.do_listen()
         self.do_plot()
         self.do_predict()
-        self.do_stop()
 
+    @argcheck(max=1)
     def do_train(self, args=''):
         '''
-        Train neural network
-
-        Command will first load cached X and y data located in
-        'mmwave/data/.X_data' and 'mmwave/data/.y_data' files. This data will be
-        used for the training process. If you want to read raw .csv files,
-        provide \'refresh\' (this will take few minutes).
+        Train neural network with data
 
         Usage:
         >> train
-        >> train refresh
+        >> train <DATA_PATH>
         '''
 
-        if len(args.split()) > 1:
-            error('Unknown arguments.')
-            return
+        # TODO: ability to set data dir
 
-        if args == '':
-            refresh_data = False
-        elif args == 'refresh':
-            refresh_data = True
-        else:
-            warning(f'Unknown argument: {args}')
-            return
-
-        X, y = Logger.get_all_data(reread=refresh_data)
+        X, y = Logger.get_all_data()
         Logger.get_stats(X, y)
         X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=.3,
                                                           stratify=y,
                                                           random_state=12)
         self.model.train(X_train, y_train, X_val, y_val)
 
-    def complete_train(self, text, line, begidx, endidx):
-        return self.complete_from_list(['refresh'], text, line)
-
+    @argcheck(max=1)
     def do_eval(self, args=''):
         '''
         Evaluate neural network
 
-        Command will first load cached X and y data located in
-        \'mmwave/data/.X_data\' and \'mmwave/data/.y_data\' files. This data
-        will be used for the evaluating process. If you want to read raw .csv
-        files, provide \'refresh\' (this will take few minutes).
-
         Usage:
         >> eval
-        >> eval refresh
+        >> eval <DATA_PATH>
         '''
 
-        if len(args.split()) > 1:
-            error('Unknown arguments.')
-            return
+        # TODO: ability to set data dir
 
-        if args == '':
-            refresh_data = False
-        elif args == 'refresh':
-            refresh_data = True
-        else:
-            warning(f'Unknown argument: {args}')
-            return
-
-        X, y = Logger.get_all_data(refresh_data=refresh_data)
+        X, y = Logger.get_all_data()
         Logger.get_stats(X, y)
 
         X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=.3,
                                                           stratify=y,
                                                           random_state=12)
 
-        if not self.model_loaded():
+        if not self.model.loaded():
             self.model.load()
             print()
 
@@ -799,6 +749,8 @@ class Console(Cmd):
     def complete_eval(self, text, line, begidx, endidx):
         return self.complete_from_list(['refresh'], text, line)
 
+    @argcheck(min=1, max=1)
+    @if_thread_running('listen')
     def do_log(self, args=''):
         '''
         Log data
@@ -813,19 +765,9 @@ class Console(Cmd):
         >> log ccw
         >> log z
         '''
-        if args == '':
-            error('too few arguments.')
-            return
-
-        if len(args.split()) > 1:
-            error('Unknown arguments.')
-            return
 
         if not GESTURE.check(args):
             warning(f'Unknown argument: {args}')
-            return
-
-        if not self.check_thread('listen'):
             return
 
         self.logger.set_gesture(args)
@@ -843,6 +785,7 @@ class Console(Cmd):
     def complete_log(self, text, line, begidx, endidx):
         return self.complete_gestures(text, line)
 
+    @argcheck(min=1, max=1)
     def do_remove(self, args=''):
         '''
         Remove last sample
@@ -856,16 +799,9 @@ class Console(Cmd):
         >> remove ccw
         >> remove z
         '''
-        if args == '':
-            error('too few arguments.')
-            return
 
-        if len(args.split()) > 1:
-            error('Unknown arguments.')
-            return
-
-        if not GESTURE.check(args):
-            warning(f'Unknown argument: {args}')
+        if not GESTURE.__contains__(args):
+            error(f'Unknown argument: {args}')
             return
 
         self.logger.set_gesture(args)
@@ -874,6 +810,8 @@ class Console(Cmd):
     def complete_remove(self, text, line, begidx, endidx):
         return self.complete_gestures(text, line)
 
+    @argcheck(min=1, max=1)
+    @if_thread_running('plot')
     def do_redraw(self, args=''):
         '''
         Redraw sample
@@ -887,19 +825,9 @@ class Console(Cmd):
         >> redraw ccw
         >> redraw z
         '''
-        if args == '':
-            error('too few arguments.')
-            return
-
-        if len(args.split()) > 1:
-            error('Unknown arguments.')
-            return
-
-        if not self.check_thread('plot'):
-            return
 
         if not GESTURE.check(args):
-            warning(f'Unknown argument: {args}')
+            error(f'Unknown argument: {args}')
             return
 
         self.plot_thread.send_to_main(self.plotter.draw_last_sample, args)
@@ -914,7 +842,7 @@ def console_thread(console):
         console.cmdloop()
 
 
-def plotting(q):
+def main(q):
     while True:
         func, args, kwargs = q.get()
         func(*args, **kwargs)
@@ -925,4 +853,4 @@ if __name__ == '__main__':
     console_thread(Console(main_queue))
 
     # All plotting stuff has to be done in main thread
-    plotting(main_queue)
+    main(main_queue)

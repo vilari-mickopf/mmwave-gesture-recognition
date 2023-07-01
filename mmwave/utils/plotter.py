@@ -39,7 +39,7 @@ class Plotter:
         self.fig, self.ax = plt.subplots()
         self.sc = self.ax.scatter([], [], color='r', picker=10, animated=True)
 
-        self.ax.grid(b=False)
+        self.ax.grid(False)
         plt.xticks(np.arange(-100, 101, step=25),
                    ('-1m', '-0.75m', '-0.5m', '-0.25m',
                       '0', '+0.25m', '+0.5m', '+0.75m', '1m'))
@@ -75,8 +75,8 @@ class Plotter:
         self.ax.draw_artist(self.sc)
         self.fig.canvas.blit(self.ax.bbox)
 
-    def update(self, points=[]):
-        if points == []:
+    def update(self, points=None):
+        if not points:
             points = [None, None]
 
         self.sc.set_offsets(points)
@@ -126,12 +126,13 @@ class Plotter:
 
     def plot_detected_objs(self, frame):
         points = []
+
         if (frame is not None and
                 frame.get('tlvs') is not None and
-                frame['tlvs'].get(1) is not None):
+                frame['tlvs'].get('detectedPoints') is not None):
 
-            objs = frame['tlvs'][1]['values']['objs']
-            desc = frame['tlvs'][1]['values']['descriptor']
+            objs = frame['tlvs']['detectedPoints']['objs']
+            desc = frame['tlvs']['detectedPoints']['descriptor']
             for obj in objs:
                 if obj is None or None in obj.values():
                     continue

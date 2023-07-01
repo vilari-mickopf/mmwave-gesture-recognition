@@ -1,4 +1,4 @@
-#! /usr/bin/env python
+#!/usr/bin/env python
 
 import time
 import struct
@@ -16,15 +16,15 @@ colorama.init(autoreset=True)
 
 class Parser:
     def __init__(self, formats):
+        self.formats = formats
+
+        self.parsing = False
         self.sync = False
         self.sync_time = -1
         self.sync_timeout = 2
 
         self.buffer = bytearray()
 
-        self.formats = formats
-
-        self.parsing = False
         self.frame = None
         self.frame_num = 0
 
@@ -72,8 +72,6 @@ class Parser:
         if header is None:
             return
 
-        header = header['values']
-
         if not self.len_check(header['packet_len'], len(frame), echo=warn):
             return
 
@@ -86,14 +84,14 @@ class Parser:
 
         tlvs = {}
         for tlv in range(header['num_tlvs']):
-            tlv_type = self.parse_value('I', echo=warn)
+            tlv_index = int(self.parse_value('I', echo=warn)) - 1
             tlv_len = self.parse_value('I', echo=warn)
 
-            if self.formats.tlvs.get(tlv_type) is None:
+            if len(self.formats.tlvs) < tlv_index:
                 return
 
-            tlv_format = self.formats.tlvs[tlv_type]
-            tlvs[tlv_type] = self.parse_struct(tlv_format, echo=warn)
+            tlv_type = list(self.formats.tlvs)[tlv_index]
+            tlvs[tlv_type] = self.parse_struct(self.formats.tlvs[tlv_type], echo=warn)
 
         return {'header': header, 'tlvs': tlvs}
 
@@ -102,7 +100,7 @@ class Parser:
         for key, value_format in struct_format.items():
             if isinstance(value_format, dict):
                 value = self.parse_struct(value_format, echo)
-            elif key == 'objs' and isinstance(value_format, list):
+            elif isinstance(value_format, list):
                 size_idxs = value_format[0].split('.')
                 size = parsed_struct[size_idxs[0]]
                 for i in size_idxs[1:]:
@@ -110,10 +108,7 @@ class Parser:
 
                 value = [self.parse_struct(value_format[1], echo) for _ in range(size)]
             else:
-                if key == 'name':
-                    value = value_format
-                else:
-                    value = self.parse_value(value_format, echo)
+                value = self.parse_value(value_format, echo)
             parsed_struct[key] = value
         return parsed_struct
 

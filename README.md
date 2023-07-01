@@ -16,6 +16,9 @@ Collecting data from TI AWR1642 via serial port and passing it through convoluti
 
 # Getting Started
 
+## Deps:
+python 3.8+
+
 ## Installation
 
 Install [mmwave](./mmwave/) package locally:

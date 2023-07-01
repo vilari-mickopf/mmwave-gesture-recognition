@@ -1,4 +1,4 @@
-#! /usr/bin/env python
+#!/usr/bin/env python
 
 import re
 import time
@@ -24,25 +24,48 @@ class Connection:
 
     def __init__(self, name, rate=None):
         self.name = name
-        self.rate = rate
+        self._rate = rate
         self.port = None
 
-    def valid_baudrate(self, rate):
-        if rate is not None and rate not in self.BAUDRATES:
-            print(f'{Fore.RED}Baudate not valid.')
-            return False
-        return True
-
     def connected(self):
-        if self.port is None:
-            return False
-        return True
+        return self.port is not None
 
     def if_connected(fn):
         def wrapper(self, *args, **kwargs):
             if self.connected():
                 return fn(self, *args, **kwargs)
         return wrapper
+
+    @property
+    def rate(self):
+        return self._rate
+
+    @rate.setter
+    @if_connected
+    def rate(self, rate):
+        detected_rate = self.get_baudrate()
+
+        if rate is None:
+            if detected_rate is None:
+                print(f'{Fore.YELLOW}Is the connection open?',
+                      f'{Fore.YELLOW}If not, baudrate should be specified manually.')
+                print(f'{Fore.RED}No valid baud rate detected.',
+                      f'{Fore.RED}Please check your connection.')
+            else:
+                rate = detected_rate
+                print(f'Detected baud rate {Fore.BLUE}{detected_rate}.')
+
+        if rate is None or rate not in self.BAUDRATES:
+            print(f'{Fore.RED}Invalid baud rate.')
+            self._rate = None
+            return
+
+        if None not in [detected_rate, rate] and rate != detected_rate:
+            print(f'{Fore.YELLOW}Specified rate {rate}, but detected {detected_rate}.')
+
+        self._rate = rate
+        self.port.baudrate = self._rate
+        print(f'Selecting baud rate {Fore.BLUE}{self.rate}')
 
     def connection_error_handler(fn):
         def wrapper(self, *args, **kwargs):
@@ -71,41 +94,9 @@ class Connection:
                                   writeTimeout=0,
                                   timeout=self.TIMEOUT)
 
-        if not self.set_baudrate(self.rate):
+        self.rate = self._rate
+        if self.rate is None:
             self.port = None
-
-        return True
-
-    @staticmethod
-    def print_available_ports():
-        print(f'{Fore.YELLOW}Available ports:')
-        for available_port in serial.tools.list_ports.comports():
-            print(f'\t{Fore.YELLOW}{available_port}')
-
-    @if_connected
-    def set_baudrate(self, rate=None):
-        detected_rate = self.get_baudrate()
-        if rate is None:
-            if detected_rate is None:
-                print(f'{Fore.YELLOW}Is the connection open?',
-                      f'{Fore.YELLOW}If not, baudrate should be specified manually.')
-                print(f'{Fore.RED}No valid baud rate detected.',
-                      f'{Fore.RED}Please check your connection.')
-                return False
-            else:
-                rate = detected_rate
-                print(f'Detected baud rate {Fore.BLUE}{detected_rate}.')
-        elif detected_rate is not None and rate != detected_rate:
-            print(f'{Fore.YELLOW}Specified rate {rate}, but detected {detected_rate}.')
-
-        if not self.valid_baudrate(rate):
-            print(f'{Fore.RED}Invalid baud rate.')
-            return False
-
-        self.rate = rate
-        self.port.baudrate = rate
-        print(f'Selecting baud rate {Fore.BLUE}{self.rate}')
-        return True
 
     def reset(self):
         self.close()
@@ -128,8 +119,6 @@ class Connection:
         self.port.flushInput()
         self.port.flushOutput()
 
-    @if_connected
-    @connection_error_handler
     def disconnect(self):
         print(f'Disconnecting port {Fore.BLUE}{self.name}')
         self.close()
@@ -160,23 +149,22 @@ class Connection:
         self.port.write(test_packet.encode())
 
         time.sleep(.01)
-        if test_packet.encode() in self.read():
-            return True
-        return False
+        return test_packet.encode() in self.read()
 
     def get_baudrate(self):
-        detected_baudrate = None
         for baudrate in reversed(Connection.BAUDRATES):
             if self.check_baudrate(baudrate):
-                detected_baudrate = baudrate
-                break
+                return baudrate
 
-        return detected_baudrate
+    @staticmethod
+    def print_available_ports():
+        print(f'{Fore.YELLOW}Available ports:')
+        for available_port in serial.tools.list_ports.comports():
+            print(f'\t{Fore.YELLOW}{available_port}')
 
 
 class mmWave:
-    def __init__(self, cli_port, data_port=None,
-                       cli_rate=None, data_rate=None):
+    def __init__(self, cli_port, data_port=None, cli_rate=None, data_rate=None):
         self.cli_port = Connection(cli_port, cli_rate)
         if data_port is None or data_port == cli_port:
             self.data_port = self.cli_port

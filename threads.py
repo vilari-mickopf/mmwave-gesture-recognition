@@ -1,4 +1,4 @@
-#! /usr/bin/env python
+#!/usr/bin/env python
 
 import time
 import queue
@@ -143,7 +143,7 @@ class PredictThread(Thread):
 
         if (frame is not None and
                 frame.get('tlvs') is not None and
-                frame['tlvs'].get(1) is not None):
+                frame['tlvs'].get('detectedPoints') is not None):
             self.detected_time = time.perf_counter()
             if self.frame_num == 0:
                 self.sequence = []
@@ -153,7 +153,7 @@ class PredictThread(Thread):
                 self.empty_frames = []
 
             objs = []
-            for obj in frame['tlvs'][1]['values']['objs']:
+            for obj in frame['tlvs']['detectedPoints']['objs']:
                 if obj is None or None in obj.values():
                     continue
                 objs.append([
@@ -185,13 +185,16 @@ class PredictThread(Thread):
 
 
 class LogThread(Thread):
-    def __init__(self, logger):
+    def __init__(self, logger, gesture):
         super().__init__()
         self.logger = logger
+        self.gesture = gesture
 
     def process(self):
         frame = self.collect()
-        if self.logger.log(frame):
+        data = self.logger.log(frame)
+        if data is not None:
+            self.logger.save(self.gesture, data)
             self.stop()
 
 

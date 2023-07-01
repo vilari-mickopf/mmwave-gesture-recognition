@@ -1,6 +1,5 @@
-#! /usr/bin/env python
+#!/usr/bin/env python
 
-import sys
 import os
 import time
 import readline
@@ -23,12 +22,12 @@ class SignalHandler:
         signal(SIGINT, self.ctrl_c_handler)
 
     def check_timeout(self):
-        is_timeout = True
-        timeout = 3*self.timeout if self.exit_state else self.timeout
-        if time.perf_counter() - self.detected_time < timeout:
-            is_timeout = False
+        timeout = True
+        limit = 3*self.timeout if self.exit_state else self.timeout
+        if time.perf_counter() - self.detected_time < limit:
+            timeout = False
         self.detected_time = time.perf_counter()
-        return is_timeout
+        return timeout
 
     def ctrl_c_handler(self, signal_received, frame):
         if not self.check_timeout():
