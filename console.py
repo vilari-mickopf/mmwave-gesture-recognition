@@ -671,6 +671,10 @@ class Console(Cmd):
         self.predict_thread.start()
         self.parse_thread.forward_to(self.predict_thread)
 
+        # Wait for user termination
+        self.console_queue.get()
+        self.predict_thread.stop()
+
     @argcheck()
     def do_start(self, args=''):
         '''
