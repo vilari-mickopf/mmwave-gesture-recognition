@@ -48,11 +48,17 @@ class Plotter:
         self.ax.set_xlim(-100, 100)
         self.ax.set_ylim(0, 200)
 
-        axes_coords = [-0.2574, -0.6612, 1.54, 1.54]
+        # Plot guidelines
+        for r in np.linspace(0, 200, 8):
+            x_circle = r * np.cos(np.linspace(0, np.pi, 100))
+            y_circle = r * np.sin(np.linspace(0, np.pi, 100))
+            self.ax.plot(x_circle, y_circle, color='white', linewidth=1)
 
-        ax_polar = self.fig.add_axes(axes_coords, projection='polar')
-        ax_polar.patch.set_alpha(0)
-        ax_polar.set_yticklabels([])
+        x_diagonal = np.linspace(-1000, 1000, 100)
+        self.ax.plot(x_diagonal, x_diagonal, color='white', linewidth=1)
+        self.ax.plot(x_diagonal, -x_diagonal, color='white', linewidth=1)
+        self.ax.axvline(x=0, color='white', linewidth=1)
+
         self.sc.set_color([1, 0, 0])
 
     def grab_background(self, event=None):
