@@ -4,7 +4,10 @@ import os
 import re
 from copy import deepcopy
 from itertools import count
+
 from enum import Enum, EnumMeta, auto
+
+import numpy as np
 
 
 class Formats:
@@ -226,6 +229,8 @@ class Formats:
         self.header = self.config_header()
         self.tlvs = self.config_tlvs()
 
+        self.get_params()
+
     def parse(self, config_file):
         format = self.PROFILE_CFG_FORMAT
 
@@ -284,6 +289,46 @@ class Formats:
         format['rangeDopplerHeatMap'] %= str(adc_samples*chirps_per_frame//num_tx)
 
         return format
+
+    def get_antenna_num(self, bitmap):
+        antenna_num = 0
+        for i in range(int(np.floor(np.log2(bitmap)) + 1)):
+            antenna_num += (bitmap >> i) & 1
+        return antenna_num
+
+    def get_params(self):
+        channel_cfg = self.config['channelCfg']
+        self.num_rx_ant = self.get_antenna_num(channel_cfg['rxAntBitmap'])
+        self.num_tx_ant = self.get_antenna_num(channel_cfg['txAntBitmap'])
+
+        frame_cfg = self.config['frameCfg']
+        self.num_chirps_per_frame = frame_cfg['chirpEndIdx']
+        self.num_chirps_per_frame -= frame_cfg['chirpStartIdx'] - 1
+        self.num_chirps_per_frame *= frame_cfg['nLoops']
+
+        self.num_doppler_bins = self.num_chirps_per_frame/self.num_tx_ant
+
+        profile_cfg = self.config['profileCfg']
+        self.num_range_bins = int(2**np.ceil(np.log2(profile_cfg['numAdcSamples'])))
+
+        range_factor = 3e8 * profile_cfg['digOutSampleRate'] * 1e3
+        range_factor /= 2 * profile_cfg['freqSlopeConst'] * 1e12
+        self.range_resolution_meters = range_factor * profile_cfg['numAdcSamples']
+        self.range_idx_to_meters = range_factor * self.num_range_bins
+
+        ramp_time = profile_cfg['idleTime'] + profile_cfg['rampEndTime']
+
+        self.doppler_resolution_mps = 3e8
+        self.doppler_resolution_mps /= 2 * profile_cfg['startFreq'] * 1e9
+        self.doppler_resolution_mps /= 1e-6 * self.num_doppler_bins * self.num_tx_ant
+        self.doppler_resolution_mps /= ramp_time
+
+        self.max_range = 300 * 0.9 * profile_cfg['digOutSampleRate']
+        self.max_range /= 2 * profile_cfg['freqSlopeConst'] * 1e3
+
+        self.max_velocity = 3e8
+        self.max_velocity /= 4 * profile_cfg['startFreq'] * 1e9 * 1e-6
+        self.max_velocity /= self.num_tx_ant * ramp_time
 
 
 class GESTURE_META(EnumMeta):
