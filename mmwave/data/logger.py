@@ -29,16 +29,14 @@ class Logger:
             self.empty_frames_cnt = 0
             print(f'Saving sample...')
 
-        if (frame is not None and
-                frame.get('tlvs') is not None and
-                frame['tlvs'].get('detectedPoints') is not None):
+        if frame and frame.get('tlvs', {}).get('detectedPoints') is not None:
             self.detected_time = time.perf_counter()
 
             empty_frames = [[None]*len(frame)]*self.empty_frames_cnt
             self.data.extend(empty_frames)
-
             self.data.append(frame)
-            return
+
+            return None
 
         self.empty_frames_cnt += 1
         if time.perf_counter() - self.detected_time > self.timeout:

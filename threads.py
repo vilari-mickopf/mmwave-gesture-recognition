@@ -92,9 +92,10 @@ class ListenThread(Thread):
 
 
 class ParseThread(Thread):
-    def __init__(self, parser):
+    def __init__(self, parser, convert_objs=True):
         super().__init__()
         self.parser = parser
+        self.convert_objs = convert_objs
 
     def process(self):
         data = self.collect()
@@ -107,6 +108,10 @@ class ParseThread(Thread):
                 continue
 
             frame = self.parser.parse(self.parser.formats.MAGIC_NUMBER + frame, warn=True)
+            if self.convert_objs and frame and frame.get('tlvs', {}).get('detectedPoints'):
+                points = frame['tlvs']['detectedPoints']
+                self.parser.convert_detected_points(points)
+
             self.forward(frame)
 
 

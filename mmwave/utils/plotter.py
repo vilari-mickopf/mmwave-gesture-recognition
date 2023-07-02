@@ -1,4 +1,4 @@
-#! /usr/bin/env python
+#!/usr/bin/env python
 
 import time
 
@@ -40,21 +40,21 @@ class Plotter:
         self.sc = self.ax.scatter([], [], color='r', picker=10, animated=True)
 
         self.ax.grid(False)
-        plt.xticks(np.arange(-100, 101, step=25),
+        plt.xticks(np.arange(-1, 1.01, step=.25),
                    ('-1m', '-0.75m', '-0.5m', '-0.25m',
                       '0', '+0.25m', '+0.5m', '+0.75m', '1m'))
-        plt.yticks(np.arange(0, 201, step=40),
+        plt.yticks(np.arange(0, 1.251, step=.25),
                    ('0', '0.25m', '0.5m', '0.75m', '1m', '1.25m'))
-        self.ax.set_xlim(-100, 100)
-        self.ax.set_ylim(0, 200)
+        self.ax.set_xlim(-1, 1)
+        self.ax.set_ylim(0, 1.41)
 
         # Plot guidelines
-        for r in np.linspace(0, 200, 8):
+        for r in np.linspace(0, 2, 9):
             x_circle = r * np.cos(np.linspace(0, np.pi, 100))
             y_circle = r * np.sin(np.linspace(0, np.pi, 100))
             self.ax.plot(x_circle, y_circle, color='white', linewidth=1)
 
-        x_diagonal = np.linspace(-1000, 1000, 100)
+        x_diagonal = np.linspace(-2, 2, 10)
         self.ax.plot(x_diagonal, x_diagonal, color='white', linewidth=1)
         self.ax.plot(x_diagonal, -x_diagonal, color='white', linewidth=1)
         self.ax.axvline(x=0, color='white', linewidth=1)
@@ -132,28 +132,15 @@ class Plotter:
 
     def plot_detected_objs(self, frame):
         points = []
+        if frame and frame.get('tlvs', {}).get('detectedPoints') is not None:
+            detected_points = frame['tlvs']['detectedPoints']
+            assert detected_points['descriptor'].get('converted') == True
 
-        if (frame is not None and
-                frame.get('tlvs') is not None and
-                frame['tlvs'].get('detectedPoints') is not None):
-
-            objs = frame['tlvs']['detectedPoints']['objs']
-            desc = frame['tlvs']['detectedPoints']['descriptor']
-            for obj in objs:
-                if obj is None or None in obj.values():
+            for obj in detected_points['objs']:
+                if not obj or None in obj.values():
                     continue
 
-                x, y = obj['x_coord'], obj['y_coord']
-                if x > 32767:
-                    x = x - 65536
-
-                if y > 32767:
-                    y = y - 65536
-
-                x = x/desc['xyz_q_format']
-                y = y/desc['xyz_q_format']
-
-                points.append([x, y])
+                points.append([obj['x'], obj['y']])
 
         self.update(points)
 

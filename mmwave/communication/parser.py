@@ -6,6 +6,7 @@ from copy import deepcopy
 from pprint import pformat
 
 import pandas as pd
+import numpy as np
 
 from mmwave.utils.prints import print
 
@@ -132,7 +133,7 @@ class Parser:
     def header_frame_num_check(self, header, echo=False):
         if self.frame_num != 0 and self.frame_num + 1 != header['frame_num']:
             if echo:
-                num_of_missed_frames = header['frame_num'] - self.frame_num - 1
+                num_of_missed_frames = abs(header['frame_num'] - self.frame_num - 1)
                 print(f'{Fore.YELLOW}WARNING: Missed {num_of_missed_frames} ', end='')
                 if num_of_missed_frames > 1:
                     print(f'{Fore.YELLOW}frames.')
@@ -149,6 +150,34 @@ class Parser:
                 print(f'{Fore.RED}ERROR: Corrupted frame.')
             return False
         return True
+
+    def convert_idx(self, x, qformat=0):
+        if x > 32767:
+            x -= 65536
+
+        return x/2**qformat
+
+    def convert_detected_points(self, points):
+        points['descriptor']['converted'] = True
+        qformat = points['descriptor']['xyz_q_format']
+        for i, obj in enumerate(points['objs']):
+            doppler_idx = self.convert_idx(obj['doppler_idx'])
+            doppler = doppler_idx * self.formats.doppler_resolution_mps
+
+            range_val = obj['range_idx'] * self.formats.range_idx_to_meters
+            peak = obj['peak_value']/65535
+            if peak < 0:
+                print('ALERT')
+                exit()
+
+            x = self.convert_idx(obj['x_coord'], qformat=qformat)
+            y = self.convert_idx(obj['y_coord'], qformat=qformat)
+            z = self.convert_idx(obj['z_coord'], qformat=qformat)
+
+            points['objs'][i] = {
+                'x': x, 'y': y, 'z': z, 'range': range_val,
+                'doppler': doppler, 'peak': peak
+            }
 
     @staticmethod
     def pprint(frame):

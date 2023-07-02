@@ -310,20 +310,21 @@ class Formats:
 
         profile_cfg = self.config['profileCfg']
         self.num_range_bins = int(2**np.ceil(np.log2(profile_cfg['numAdcSamples'])))
+        self.num_doppler_bins = self.num_chirps_per_frame // self.num_tx_ant
 
-        range_factor = 3e8 * profile_cfg['digOutSampleRate'] * 1e3
-        range_factor /= 2 * profile_cfg['freqSlopeConst'] * 1e12
-        self.range_resolution_meters = range_factor * profile_cfg['numAdcSamples']
-        self.range_idx_to_meters = range_factor * self.num_range_bins
+        range_factor = 300 * profile_cfg['digOutSampleRate']
+        range_factor /= 2 * profile_cfg['freqSlopeConst'] * 1e3
+        self.range_resolution_meters = range_factor / profile_cfg['numAdcSamples']
+        self.range_idx_to_meters = range_factor / self.num_range_bins
 
         ramp_time = profile_cfg['idleTime'] + profile_cfg['rampEndTime']
 
         self.doppler_resolution_mps = 3e8
         self.doppler_resolution_mps /= 2 * profile_cfg['startFreq'] * 1e9
-        self.doppler_resolution_mps /= 1e-6 * self.num_doppler_bins * self.num_tx_ant
+        self.doppler_resolution_mps /= 1e-6 * self.num_chirps_per_frame
         self.doppler_resolution_mps /= ramp_time
 
-        self.max_range = 300 * 0.9 * profile_cfg['digOutSampleRate']
+        self.max_range = 300 * 0.8 * profile_cfg['digOutSampleRate']
         self.max_range /= 2 * profile_cfg['freqSlopeConst'] * 1e3
 
         self.max_velocity = 3e8

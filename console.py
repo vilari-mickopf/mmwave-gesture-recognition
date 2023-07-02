@@ -45,7 +45,7 @@ class Console(Cmd):
                          cli_rate=self.default_cli_rate,
                          data_rate=self.default_data_rate)
 
-        if self.mmwave is None or self.mmwave.connected() is False:
+        if self.mmwave is None or not self.mmwave.connected():
             print('Try connecting manually. Type \'help connect\' for more info.\n')
 
         # Configuration
