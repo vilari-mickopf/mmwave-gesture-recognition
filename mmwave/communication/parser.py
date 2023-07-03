@@ -2,11 +2,10 @@
 
 import time
 import struct
+import pprint
 from copy import deepcopy
-from pprint import pformat
 
 import pandas as pd
-import numpy as np
 
 from mmwave.utils.prints import print
 
@@ -97,20 +96,25 @@ class Parser:
         return {'header': header, 'tlvs': tlvs}
 
     def parse_struct(self, struct_format, echo=False):
-        parsed_struct = {}
-        for key, value_format in struct_format.items():
-            if isinstance(value_format, dict):
-                value = self.parse_struct(value_format, echo)
-            elif isinstance(value_format, list):
-                size_idxs = value_format[0].split('.')
-                size = parsed_struct[size_idxs[0]]
-                for i in size_idxs[1:]:
-                    size = size[i]
+        if isinstance(struct_format, dict):
+            parsed_struct = {}
+            for key, value_format in struct_format.items():
+                if isinstance(value_format, dict):
+                    value = self.parse_struct(value_format, echo)
 
-                value = [self.parse_struct(value_format[1], echo) for _ in range(size)]
-            else:
-                value = self.parse_value(value_format, echo)
-            parsed_struct[key] = value
+                elif isinstance(value_format, list):
+                    size_idxs = value_format[0].split('.')
+                    size = parsed_struct[size_idxs[0]]
+                    for i in size_idxs[1:]:
+                        size = size[i]
+
+                    value = [self.parse_struct(value_format[1], echo) for _ in range(size)]
+                else:
+                    value = self.parse_value(value_format, echo)
+                parsed_struct[key] = value
+        else:
+            parsed_struct = self.parse_value(struct_format, echo)
+
         return parsed_struct
 
     def parse_value(self, value_format, echo=False):
@@ -166,10 +170,6 @@ class Parser:
 
             range_val = obj['range_idx'] * self.formats.range_idx_to_meters
             peak = obj['peak_value']/65535
-            if peak < 0:
-                print('ALERT')
-                exit()
-
             x = self.convert_idx(obj['x_coord'], qformat=qformat)
             y = self.convert_idx(obj['y_coord'], qformat=qformat)
             z = self.convert_idx(obj['z_coord'], qformat=qformat)
@@ -211,6 +211,7 @@ class Parser:
 
                 if key != sorted(frame.keys())[-1]:
                     print(indentation)
+
             elif isinstance(value, list):
                 print(indentation, end='')
                 color = Parser.pprint_get_color(Parser.pprint_struct.num - 1)
@@ -223,7 +224,9 @@ class Parser:
                     Parser.pprint_struct.num -= 1
                     if obj != value[-1]:
                         print(indentation)
+
                 indentation = indentation[:-4]
+
             else:
                 if isinstance(value, tuple):
                     print(indentation, end='')
@@ -233,10 +236,9 @@ class Parser:
 
                     with pd.option_context('display.max_rows', 10,
                                            'display.max_columns', 6,
-                                           'precision', 2,
-                                           'show_dimensions', False):
-                        df = pd.DataFrame(value)
-                        df = pformat(df)
+                                           'display.precision', 2,
+                                           'display.show_dimensions', False):
+                        df = pprint.pformat(pd.DataFrame(value))
                         for line_idx, line in enumerate(df.split('\n')):
                             print(indentation, end='')
                             for word_idx, word in enumerate(line.split(' ')):
@@ -245,7 +247,9 @@ class Parser:
                                     color = Fore.YELLOW
                                 print(f'{color}{word}', end=' ')
                             print()
+
                     indentation = indentation[:-4]
+
                 else:
                     print(indentation, end='')
                     color = Parser.pprint_get_color(Parser.pprint_struct.num - 1)

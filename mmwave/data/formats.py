@@ -3,7 +3,6 @@
 import os
 import re
 from copy import deepcopy
-from itertools import count
 
 from enum import Enum, EnumMeta, auto
 
@@ -225,11 +224,10 @@ class Formats:
 
     def __init__(self, config):
         self.config = self.parse(config)
+        self.get_params()
 
         self.header = self.config_header()
         self.tlvs = self.config_tlvs()
-
-        self.get_params()
 
     def parse(self, config_file):
         format = self.PROFILE_CFG_FORMAT
@@ -261,32 +259,25 @@ class Formats:
     def config_tlvs(self):
         format = deepcopy(self.TLVS_FORMAT)
 
-        adc_samples = self.config['profileCfg']['numAdcSamples']
-
-        # RangeBins: number of ADC samples rounded up to the nearest power of 2
-        for factor in count():
-            res = 2**factor
-            if res >= adc_samples:
-                if (res - adc_samples) < (adc_samples - res/2):
-                    adc_samples = res
-                else:
-                    adc_samples = res//2
-                break
+        num_adc_samples = self.config['profileCfg']['numAdcSamples']
+        num_range_bins = self.num_range_bins
+        if (num_range_bins - num_adc_samples) >= (num_adc_samples - num_range_bins/2):
+            num_range_bins //= 2
 
         # Size: RangeBins
-        format['rangeProfile'] %= str(adc_samples)
+        format['rangeProfile'] %= str(num_range_bins)
         # Size: RangeBins
-        format['noiseProfile'] %= str(adc_samples)
+        format['noiseProfile'] %= str(num_range_bins)
 
         # Size: RangeBins * num_virtual_antennas
-        num_rx = bin(self.config['channelCfg']['rxAntBitmap']).count('1')
-        num_tx = bin(self.config['channelCfg']['txAntBitmap']).count('1')
-        format['rangeAzimuthHeatMap'] %= str(adc_samples*num_rx*num_tx)
+        format['rangeAzimuthHeatMap'] %= str(num_range_bins *
+                                             self.num_rx * self.num_tx)
 
         # Size: RangeBins * DopplerBins
-        chirps_per_frame = (self.config['frameCfg']['chirpEndIdx'] -
-                            self.config['frameCfg']['chirpStartIdx'])
-        format['rangeDopplerHeatMap'] %= str(adc_samples*chirps_per_frame//num_tx)
+        frame_cfg = self.config['frameCfg']
+        chirps_per_frame = frame_cfg['chirpEndIdx'] - frame_cfg['chirpStartIdx']
+        format['rangeDopplerHeatMap'] %= str(num_range_bins *
+                                             chirps_per_frame//self.num_tx)
 
         return format
 
@@ -298,24 +289,22 @@ class Formats:
 
     def get_params(self):
         channel_cfg = self.config['channelCfg']
-        self.num_rx_ant = self.get_antenna_num(channel_cfg['rxAntBitmap'])
-        self.num_tx_ant = self.get_antenna_num(channel_cfg['txAntBitmap'])
+        self.num_rx = self.get_antenna_num(channel_cfg['rxAntBitmap'])
+        self.num_tx = self.get_antenna_num(channel_cfg['txAntBitmap'])
 
         frame_cfg = self.config['frameCfg']
         self.num_chirps_per_frame = frame_cfg['chirpEndIdx']
         self.num_chirps_per_frame -= frame_cfg['chirpStartIdx'] - 1
         self.num_chirps_per_frame *= frame_cfg['nLoops']
 
-        self.num_doppler_bins = self.num_chirps_per_frame/self.num_tx_ant
-
         profile_cfg = self.config['profileCfg']
         self.num_range_bins = int(2**np.ceil(np.log2(profile_cfg['numAdcSamples'])))
-        self.num_doppler_bins = self.num_chirps_per_frame // self.num_tx_ant
+        self.num_doppler_bins = self.num_chirps_per_frame//self.num_tx
 
         range_factor = 300 * profile_cfg['digOutSampleRate']
         range_factor /= 2 * profile_cfg['freqSlopeConst'] * 1e3
-        self.range_resolution_meters = range_factor / profile_cfg['numAdcSamples']
-        self.range_idx_to_meters = range_factor / self.num_range_bins
+        self.range_resolution_meters = range_factor/profile_cfg['numAdcSamples']
+        self.range_idx_to_meters = range_factor/self.num_range_bins
 
         ramp_time = profile_cfg['idleTime'] + profile_cfg['rampEndTime']
 
@@ -329,16 +318,16 @@ class Formats:
 
         self.max_velocity = 3e8
         self.max_velocity /= 4 * profile_cfg['startFreq'] * 1e9 * 1e-6
-        self.max_velocity /= self.num_tx_ant * ramp_time
+        self.max_velocity /= self.num_tx * ramp_time
 
 
 class GESTURE_META(EnumMeta):
     def __getitem__(self, index_or_name):
         if isinstance(index_or_name, str):
-            return super().__getitem__(index_or_name.upper()).value
+            return super().__getitem__(index_or_name.upper())
 
         elif isinstance(index_or_name, int) and index_or_name < super().__len__():
-            return list(self)[index_or_name].name
+            return list(self)[index_or_name]
 
     def __contains__(cls, index_or_name):
         if isinstance(index_or_name, cls):
@@ -371,8 +360,8 @@ class GESTURE(Enum, metaclass=GESTURE_META):
         self._dir = path
 
     def last_file(self):
-        save_dir = os.path(self.dir, self.name)
-        if os.listdir(save_dir) == []:
+        save_dir = os.path.join(self.dir, self.name.lower())
+        if not os.listdir(save_dir):
             return
 
         nums = []

@@ -11,6 +11,10 @@ from multimethod import multimethod
 from mmwave.data.formats import GESTURE
 from mmwave.utils.prints import print, warning
 
+import colorama
+from colorama import Fore
+colorama.init(autoreset=True)
+
 
 class Logger:
     def __init__(self, timeout=.5):
@@ -19,22 +23,24 @@ class Logger:
 
     def reset(self):
         self.data = None
-        self.detected_time = -1
-        self.empty_frames_cnt = -1
+        self.detected_time = 0
+        self.empty_frames_cnt = 0
 
     def log(self, frame):
         if self.data is None:
             self.data = []
-            self.detected_time = time.perf_counter(),
+            self.detected_time = time.perf_counter()
             self.empty_frames_cnt = 0
             print(f'Saving sample...')
 
-        if frame and frame.get('tlvs', {}).get('detectedPoints') is not None:
+        if frame and frame.get('tlvs', {}).get('detectedPoints'):
             self.detected_time = time.perf_counter()
 
-            empty_frames = [[None]*len(frame)]*self.empty_frames_cnt
+            # obj_len = len(frame['tlvs']['detectedPoints']['objs'][0])
+            # empty_frames = [[None]*obj_len]*self.empty_frames_cnt
+            empty_frames = [None]*self.empty_frames_cnt
             self.data.extend(empty_frames)
-            self.data.append(frame)
+            self.data.append(frame['tlvs']['detectedPoints']['objs'])
 
             return None
 
@@ -46,13 +52,15 @@ class Logger:
 
     def save(self, gesture, data):
         gesture = gesture if isinstance(gesture, GESTURE) else GESTURE[gesture]
-        if data is None or len(data) < 0:
-            warning('Nothing to save.')
+        if not data:
+            warning('Nothing to save.\n')
+            return
 
-        np.savez_compressed(self.gesture.next_file(), data=self.data)
+        np.savez_compressed(gesture.next_file(), data=self.data)
+        print(f'{Fore.GREEN}Sample saved.\n')
 
-    def discard_last_sample(self):
-        last_sample = self.gesture.last_file()
+    def discard_last_sample(self, gesture):
+        last_sample = gesture.last_file()
         if last_sample is None:
             print('No files.')
             return
@@ -68,24 +76,6 @@ class Logger:
 
         for f in tqdm(os.listdir(gesture.dir), desc='Files', leave=False):
             yield np.load(os.path.join(gesture.dir, f), allow_pickle=True)['data']
-
-            #  num_of_frames = df.iloc[-1]['frame'] + 1
-            #  sample = [[] for _ in range(num_of_frames)]
-
-            #  for _, row in df.iterrows():
-                #  if row['x'] == 'None':
-                    #  obj = 5*[0.]
-                #  else:
-                    #  obj = [
-                        #  float(row['x'])/65535.,
-                        #  float(row['y'])/65535.,
-                        #  float(row['range_idx'])/65535.,
-                        #  float(row['peak_value'])/65535.,
-                        #  float(row['doppler_idx'])/65535.
-                    #  ]
-                #  sample[row['frame']].append(obj)
-
-            #  yield sample
 
     @staticmethod
     @multimethod

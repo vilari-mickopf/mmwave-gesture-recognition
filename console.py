@@ -770,13 +770,11 @@ class Console(Cmd):
         >> log z
         '''
 
-        if not GESTURE.check(args):
+        if not args in GESTURE:
             warning(f'Unknown argument: {args}')
             return
 
-        self.logger.set_gesture(args)
-
-        self.log_thread = LogThread(self.logger)
+        self.log_thread = LogThread(self.logger, GESTURE[args])
         self.log_thread.start()
         self.parse_thread.forward_to(self.log_thread)
 
@@ -804,12 +802,11 @@ class Console(Cmd):
         >> remove z
         '''
 
-        if not GESTURE.__contains__(args):
-            error(f'Unknown argument: {args}')
+        if not args in GESTURE:
+            error(f'Unknown gesture: {args}')
             return
 
-        self.logger.set_gesture(args)
-        self.logger.discard_last_sample()
+        self.logger.discard_last_sample(args)
 
     def complete_remove(self, text, line, begidx, endidx):
         return self.complete_gestures(text, line)
@@ -830,11 +827,11 @@ class Console(Cmd):
         >> redraw z
         '''
 
-        if not GESTURE.check(args):
-            error(f'Unknown argument: {args}')
+        if args not in GESTURE:
+            error(f'Unknown gesture: {args}')
             return
 
-        self.plot_thread.send_to_main(self.plotter.draw_last_sample, args)
+        self.plot_thread.send_to_main(self.plotter.draw_last_sample, GESTURE[args])
 
     def complete_redraw(self, text, line, begidx, endidx):
         return self.complete_gestures(text, line)

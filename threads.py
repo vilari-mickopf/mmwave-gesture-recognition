@@ -1,10 +1,12 @@
 #!/usr/bin/env python
 
+import os
 import time
 import queue
 import threading
 
 from abc import ABC, abstractmethod
+from mmwave.utils.prints import print
 
 
 def threaded(fn):
@@ -109,8 +111,7 @@ class ParseThread(Thread):
 
             frame = self.parser.parse(self.parser.formats.MAGIC_NUMBER + frame, warn=True)
             if self.convert_objs and frame and frame.get('tlvs', {}).get('detectedPoints'):
-                points = frame['tlvs']['detectedPoints']
-                self.parser.convert_detected_points(points)
+                self.parser.convert_detected_points(frame['tlvs']['detectedPoints'])
 
             self.forward(frame)
 
@@ -146,9 +147,7 @@ class PredictThread(Thread):
             self.sequence = []
             self.detected_time = time.perf_counter()
 
-        if (frame is not None and
-                frame.get('tlvs') is not None and
-                frame['tlvs'].get('detectedPoints') is not None):
+        if frame and frame.get('tlvs', {}).get('detectedPoints'):
             self.detected_time = time.perf_counter()
             if self.frame_num == 0:
                 self.sequence = []
