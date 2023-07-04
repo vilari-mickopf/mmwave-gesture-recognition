@@ -353,30 +353,29 @@ class GESTURE(Enum, metaclass=GESTURE_META):
 
     @property
     def dir(self):
-        return getattr(self, '_dir', os.path.join(os.path.dirname(__file__)))
+        dir = getattr(self, '_dir', os.path.join(os.path.dirname(__file__)))
+        return os.path.join(dir, self.name.lower())
 
     @dir.setter
     def dir(self, path):
         self._dir = path
 
     def last_file(self):
-        save_dir = os.path.join(self.dir, self.name.lower())
-        if not os.listdir(save_dir):
+        if not os.listdir(self.dir):
             return
 
         nums = []
-        for f in os.listdir(save_dir):
+        for f in os.listdir(self.dir):
             num = os.path.splitext(f)[0].split('_')[1]
             nums.append(int(num))
         last_sample = f'sample_{str(max(nums))}.npz'
-        return os.path.join(save_dir, last_sample)
+        return os.path.join(self.dir, last_sample)
 
     def next_file(self):
         last_sample = self.last_file()
         if last_sample is None:
-            return os.path.join(last_sample, 'sample_1.npz')
+            return os.path.join(self.dir, 'sample_1.npz')
 
-        save_dir = os.path.dirname(last_sample)
         last_sample_name = os.path.splitext(last_sample)[0]
         num = int(os.path.basename(last_sample_name).split('_')[1]) + 1
-        return os.path.join(save_dir, f'sample_{str(num)}.npz')
+        return os.path.join(self.dir, f'sample_{str(num)}.npz')

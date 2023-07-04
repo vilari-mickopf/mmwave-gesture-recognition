@@ -255,7 +255,7 @@ class Console(Cmd):
             def func_wrapper(self, *args, **kwargs):
                 assert min <= max
 
-                if len(args) == 0:
+                if not args:
                     args = ('', )
 
                 if args[0] != '' and min == 0 and max == 0:

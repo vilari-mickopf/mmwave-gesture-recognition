@@ -6,8 +6,6 @@ import time
 import numpy as np
 from tqdm import tqdm
 
-from multimethod import multimethod
-
 from mmwave.data.formats import GESTURE
 from mmwave.utils.prints import print, warning
 
@@ -18,30 +16,34 @@ colorama.init(autoreset=True)
 
 class Logger:
     def __init__(self, timeout=.5):
-        self.timeout = timeout
+        self.start_timeout = 3*timeout
+        self.end_timeout = timeout
         self.reset()
 
     def reset(self):
         self.data = None
         self.detected_time = 0
         self.empty_frames_cnt = 0
+        self.timeout = self.start_timeout
 
     def log(self, frame):
         if self.data is None:
             self.data = []
             self.detected_time = time.perf_counter()
+            self.timeout = self.start_timeout
             self.empty_frames_cnt = 0
             print(f'Saving sample...')
 
         if frame and frame.get('tlvs', {}).get('detectedPoints'):
+            self.timeout = self.end_timeout
             self.detected_time = time.perf_counter()
 
-            # obj_len = len(frame['tlvs']['detectedPoints']['objs'][0])
-            # empty_frames = [[None]*obj_len]*self.empty_frames_cnt
-            empty_frames = [None]*self.empty_frames_cnt
-            self.data.extend(empty_frames)
-            self.data.append(frame['tlvs']['detectedPoints']['objs'])
+            if self.data:
+                empty_frames = [None]*self.empty_frames_cnt
+                self.data.extend(empty_frames)
 
+            self.data.append(frame['tlvs']['detectedPoints']['objs'])
+            self.empty_frames_cnt = 0
             return None
 
         self.empty_frames_cnt += 1
@@ -50,13 +52,22 @@ class Logger:
             self.reset()
             return data
 
+        return None
+
     def save(self, gesture, data):
         gesture = gesture if isinstance(gesture, GESTURE) else GESTURE[gesture]
         if not data:
             warning('Nothing to save.\n')
             return
 
-        np.savez_compressed(gesture.next_file(), data=self.data)
+        if len(data) <= 3:
+            warning('Sample too short.\n')
+            return
+
+        if not os.path.exists(gesture.dir):
+            os.makedirs(gesture.dir)
+
+        np.savez_compressed(gesture.next_file(), data=np.array(data, dtype=object))
         print(f'{Fore.GREEN}Sample saved.\n')
 
     def discard_last_sample(self, gesture):
@@ -69,23 +80,30 @@ class Logger:
         print('File deleted.')
 
     @staticmethod
-    @multimethod
-    def get_data(gesture):
-        if not isinstance(gesture, GESTURE):
-            gesture = GESTURE[gesture]
-
-        for f in tqdm(os.listdir(gesture.dir), desc='Files', leave=False):
-            yield np.load(os.path.join(gesture.dir, f), allow_pickle=True)['data']
-
-    @staticmethod
-    @multimethod
-    def get_data():
+    def get_data(gesture=None):
         X, y = [], []
-        for gesture in tqdm(GESTURE, desc='Gestures'):
-            for sample in Logger.get_data(gesture):
-                X.append(sample)
+        if gesture is None:
+            for gesture in tqdm(GESTURE, desc='Gestures'):
+                data = Logger.get_data(gesture)
+                if data is None:
+                    continue
+
+                Xi, yi = data
+                X.extend(Xi)
+                y.extend(yi)
+        else:
+            if not isinstance(gesture, GESTURE):
+                gesture = GESTURE[gesture]
+
+            if not os.path.exists(gesture.dir):
+                return
+
+            for f in tqdm(os.listdir(gesture.dir), desc='Files', leave=False):
+                X.append(np.load(os.path.join(gesture.dir, f), allow_pickle=True)['data'])
                 y.append(gesture.value)
+
         return X, y
+
 
     @staticmethod
     def get_stats(X, y):
