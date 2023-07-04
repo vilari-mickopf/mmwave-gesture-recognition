@@ -90,7 +90,7 @@ class Logger:
         X_paths, y = [], []
         if gesture is None:
             for gesture in tqdm(GESTURE, desc='Gestures'):
-                paths = Logger.get_data_paths(gesture)
+                paths = Logger.get_paths(gesture)
                 if paths is None:
                     continue
 
