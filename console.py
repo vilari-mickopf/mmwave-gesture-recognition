@@ -12,13 +12,10 @@ from cmd import Cmd
 
 from sklearn.model_selection import train_test_split
 
-from mmwave.communication.connection import Connection, mmWave
-from mmwave.communication.parser import Parser
-from mmwave.data.formats import Formats, GESTURE
-from mmwave.data.logger import Logger
+from mmwave.communication import Connection, mmWave, Parser
+from mmwave.data import Formats, GESTURE, Logger
 from mmwave.model import ConvModel, LstmModel, TransModel
-from mmwave.utils.plotter import Plotter
-from mmwave.utils.prints import print, error, warning
+from mmwave.utils import Plotter, print, error, warning
 from mmwave.utils.flasher import Flasher, CMD, OPCODE
 
 from handlers import SignalHandler, Completer
