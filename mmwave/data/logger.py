@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import os
+import glob
 import time
 
 import numpy as np
@@ -39,8 +40,7 @@ class Logger:
             self.detected_time = time.perf_counter()
 
             if self.data:
-                empty_frames = [None]*self.empty_frames_cnt
-                self.data.extend(empty_frames)
+                self.data.extend([None]*self.empty_frames_cnt)
 
             self.data.append(frame['tlvs']['detectedPoints']['objs'])
             self.empty_frames_cnt = 0
@@ -60,7 +60,7 @@ class Logger:
             warning('Nothing to save.\n')
             return
 
-        if len(data) <= 3:
+        if sum(1 for frame in data if frame is not None) <= 3:
             warning('Sample too short.\n')
             return
 
@@ -81,15 +81,21 @@ class Logger:
 
     @staticmethod
     def get_data(gesture=None):
-        X, y = [], []
+        X_paths, y = Logger.get_paths(gesture)
+        X = [np.load(path, allow_pickle=True)['data'] for path in X_paths]
+        return X, y
+
+    @staticmethod
+    def get_paths(gesture=None):
+        X_paths, y = [], []
         if gesture is None:
             for gesture in tqdm(GESTURE, desc='Gestures'):
-                data = Logger.get_data(gesture)
-                if data is None:
+                paths = Logger.get_data_paths(gesture)
+                if paths is None:
                     continue
 
-                Xi, yi = data
-                X.extend(Xi)
+                Xi_paths, yi = paths
+                X_paths.extend(Xi_paths)
                 y.extend(yi)
         else:
             if not isinstance(gesture, GESTURE):
@@ -98,12 +104,11 @@ class Logger:
             if not os.path.exists(gesture.dir):
                 return
 
-            for f in tqdm(os.listdir(gesture.dir), desc='Files', leave=False):
-                X.append(np.load(os.path.join(gesture.dir, f), allow_pickle=True)['data'])
+            for f in glob.glob(f'{gesture.dir}/**/*.npz', recursive=True):
+                X_paths.append(f)
                 y.append(gesture.value)
 
-        return X, y
-
+        return X_paths, y
 
     @staticmethod
     def get_stats(X, y):
