@@ -7,7 +7,7 @@ import time
 import numpy as np
 from tqdm import tqdm
 
-from mmwave.data.formats import GESTURE
+from mmwave.data import GESTURE
 from mmwave.utils.prints import print, warning
 
 import colorama

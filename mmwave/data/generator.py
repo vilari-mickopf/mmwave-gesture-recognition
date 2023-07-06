@@ -7,27 +7,31 @@ import numpy as np
 import sklearn
 import tensorflow as tf
 
-from mmwave.data.formats import GESTURE
+from mmwave.data import GESTURE
 
 
 class DataGenerator:
     def __init__(self, paths, y, preprocessor=None, batch_size=32,
                        shuffle=False, repeat=False):
-        self.X_paths = paths
+        self.paths = paths
         self.y = y
+
         self.preprocessor = preprocessor
+        if preprocessor is not None and not isinstance(preprocessor, list):
+            self.preprocessor = [preprocessor]
 
         self.batch_size = batch_size
         self.repeat = repeat
         self.shuffle = shuffle
 
-        self.X_shape = self.load(self.X_paths[0]).shape
+        self.X_shape = self.load(self.paths[0]).shape
         self.y_shape = self.get_target(y[0]).shape
 
     def load(self, path, preprocess=True):
         data = np.load(path, allow_pickle=True)['data']
         if preprocess and self.preprocessor is not None:
-            data = self.preprocessor.process(data)
+            for p in self.preprocessor:
+                data = p.process(data)
 
         return data
 
@@ -36,7 +40,7 @@ class DataGenerator:
 
     def get_data(self):
         file_index = 0
-        paths, labels = deepcopy(self.X_paths), deepcopy(self.y)
+        paths, labels = deepcopy(self.paths), deepcopy(self.y)
 
         if self.shuffle:
             paths, labels = sklearn.utils.shuffle(paths, labels)
