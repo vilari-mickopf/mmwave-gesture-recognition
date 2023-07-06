@@ -1,16 +1,16 @@
 #!/usr/bin/env python
 
 import os
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-
 from abc import ABC, abstractmethod
 
 import numpy as np
 
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 import tensorflow as tf
-from tensorflow.keras import utils, preprocessing, layers, callbacks  # type: ignore
+from tensorflow.keras import layers, callbacks  # type: ignore
 
-from mmwave.data.formats import GESTURE
+from mmwave.data import GESTURE
+from mmwave.data import PolarPreprocessor
 
 import colorama
 from colorama import Fore
@@ -18,80 +18,61 @@ colorama.init(autoreset=True)
 
 
 class Model(ABC):
-    def __init__(self, num_of_frames=50, num_of_objs=65, num_of_data_in_obj=5, gesture=GESTURE):
+    def __init__(self, preprocessor, **params):
+        self.params = params
+        self.preprocessor = preprocessor
+        if preprocessor is not None and not isinstance(preprocessor, list):
+            self.preprocessor = [preprocessor]
+
         self.model = None
-        self.model_file = os.path.join(os.path.dirname(__file__),
-                                       f'.{self.__class__.__name__}')
-
-        self.num_of_frames = num_of_frames
-        self.num_of_objs = num_of_objs
-        self.num_of_data_in_obj = num_of_data_in_obj
-
-        self.gesture = gesture
-        self.num_of_classes = len(gesture)
-
-        self.frame_size = self.num_of_objs*self.num_of_data_in_obj
-
-    def padd_data(self, data):
-        padded_data = []
-
-        # Pad objects
-        zero_obj = [0.]*self.num_of_data_in_obj
-        for sample in data:
-            if len(sample) > self.num_of_objs:
-                sample = sample[:self.num_of_objs]
-
-            padded_sample = preprocessing.sequence.pad_sequences(
-                sample, maxlen=self.num_of_objs, dtype='float32',
-                padding='post', value=zero_obj)
-
-            padded_data.append(padded_sample)
-
-        # Pad frames
-        zero_frame = [zero_obj for _ in range(self.num_of_objs)]
-        padded_data = preprocessing.sequence.pad_sequences(
-            padded_data, maxlen=self.num_of_frames, dtype='float32',
-            padding='post', value=zero_frame)
-
-        return np.asarray(padded_data)
-
-    def prep_data(self, X, y=None):
-        # X has been already normalized while importing the data from .csv files
-        X = self.padd_data(X)
-        X = X.reshape((len(X), self.num_of_frames, self.frame_size))
-
-        if y is not None:
-            y = utils.to_categorical(y)
-            return X, y
-
-        return X
+        self.dir = os.path.join(os.path.dirname(__file__),
+                                f'.{self.__class__.__name__}')
+        self.X_shape = None
+        self.y_shape = None
 
     @abstractmethod
     def create_model(self):
         pass
 
-    def train(self, X_train, y_train, X_val, y_val):
-        X_train, y_train = self.prep_data(X_train, y_train)
-        X_val, y_val = self.prep_data(X_val, y_val)
+    def get_callbacks(self):
+        model_callbacks = [
+            callbacks.ReduceLROnPlateau(factor=.5, patience=10, verbose=1),
+            callbacks.EarlyStopping(patience=30, restore_best_weights=True)
+        ]
+        return model_callbacks
 
-        self.create_model()
+    def train(self, train_paths, y_train, validation_data=None):
+        train_data = DataGenerator(train_paths, y_train,
+                                   preprocessor=self.preprocessor,
+                                   repeat=True, shuffle=True)
+
+        self.X_shape, self.y_shape = train_data.X_shape, train_data.y_shape[-1]
+
+        validation_steps = None
+        if validation_data is not None:
+            validation_data = DataGenerator(*validation_data,
+                                            preprocessor=self.preprocessor)
+            validation_steps = len(validation_data)
+            validation_data = validation_data()
+
+        tf.keras.backend.clear_session()
+        self.create_model(**self.params)
         self.model.summary()
 
         self.model.compile(loss='categorical_crossentropy',
                            optimizer='adam',
-                           metrics=['accuracy'])
+                           metrics=['categorical_accuracy'])
 
-        self.model.fit(X_train, y_train, epochs=1000,
-                       validation_data=(X_val, y_val),
-                       callbacks=[callbacks.EarlyStopping(patience=100,
-                                                          restore_best_weights=True),
-                                  callbacks.ModelCheckpoint(self.model_file,
-                                                            verbose=True,
-                                                            save_best_only=True)])
+        self.model.fit(train_data(buffer_size=300), epochs=1000,
+                       steps_per_epoch=len(train_data),
+                       validation_data=validation_data,
+                       validation_steps=validation_steps,
+                       callbacks=self.get_callbacks())
 
     def load(self):
         print('Loading model...', end='')
-        self.model = tf.keras.models.load_model(self.model_file)
+        self.model = tf.keras.models.load_model(self.dir)
+        # TODO: pass random input through model to initilize it
         print(f'{Fore.GREEN}Done.')
 
     def loaded(self):
@@ -106,98 +87,92 @@ class Model(ABC):
         return wrapper
 
     @check_model
-    def evaluate(self, X, y):
-        X, y = self.prep_data(X, y)
-        preds = self.model.evaluate(X, y)
+    def evaluate(self, data):
+        preds = self.model.evaluate(data)
         print(f'Loss: {round(preds[0], 4)}', end=' ')
         print(f'Acc: {round(preds[1], 4)}')
 
     @check_model
-    def predict(self, X, debug=False):
-        y_pred = self.model.predict(self.prep_data(X))
-        best_guess = [y_pred[0].tolist().index(x) for x in sorted(y_pred[0], reverse=True)]
-        best_value = sorted(y_pred[0], reverse=True)
+    def predict(self, X, preprocess=True):
+        if preprocess and self.preprocessor is not None:
+            for p in self.preprocessor:
+                X = p.process(X)
 
-        if debug:
-            for guess, val in zip(best_guess, best_value):
-                print(f'{Fore.YELLOW}Best guess: {self.gesture(guess).name.lower()}: {val:.2f}')
-            print(f'{Fore.CYAN}------------------------------\n')
+        y_pred = self._predict(X)
 
-        if best_value[0] >= .9:
-            print(f'{Fore.GREEN}Gesture recognized:',
-                  f'{Fore.BLUE}{self.gesture(best_guess[0]).name.lower()}')
-            print(f'{Fore.CYAN}==============================\n')
+        best_guess = GESTURE[np.argmax(y_pred)]
+        # best_value = sorted(y_pred[0], reverse=True)
+
+        return best_guess
+
+    @tf.function
+    def _predict(self, X):
+        return self.model(X, training=False)
 
 
 class ConvModel(Model):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def create_model(self, start_filters=128, factor=2, kernel_size=3, depth=3,
+                           units=256, dropout=.5):
+        input = layers.Input(self.X_shape)
+        x = layers.Reshape((self.X_shape[0], -1))(input)
 
-    def create_model(self):
-        self.model = tf.keras.Sequential([
-            layers.InputLayer(input_shape=(self.num_of_frames, self.frame_size)),
+        conv_size = start_filters
+        x = layers.Conv1D(conv_size, kernel_size=kernel_size)(x)
+        x = layers.Conv1D(conv_size, kernel_size=kernel_size)(x)
+        x = layers.ReLU()(x)
+        x = layers.Dropout(dropout)(x)
+        x = layers.MaxPooling1D()(x)
 
-            layers.Conv1D(128, kernel_size=3),
-            layers.Conv1D(128, kernel_size=3),
-            layers.ReLU(),
-            layers.Dropout(.5),
-            layers.MaxPooling1D(),
+        for _ in range(depth-1):
+            conv_size *= factor
+            x = layers.Conv1D(conv_size, kernel_size=kernel_size)(x)
+            x = layers.ReLU()(x)
+            x = layers.Dropout(dropout)(x)
+            x = layers.MaxPooling1D()(x)
 
-            layers.Conv1D(256, kernel_size=3),
-            layers.ReLU(),
-            layers.Dropout(.5),
-            layers.MaxPooling1D(),
+        x = layers.Flatten()(x)
 
-            layers.Conv1D(512, kernel_size=3),
-            layers.ReLU(),
-            layers.Dropout(.5),
-            layers.MaxPooling1D(),
+        x = layers.Dense(units)(x)
+        x = layers.ReLU()(x)
+        x = layers.Dropout(dropout)(x)
 
-            layers.Flatten(),
-
-            layers.Dense(512),
-            layers.ReLU(),
-            layers.Dropout(.5),
-
-            layers.Dense(256),
-            layers.ReLU(),
-            layers.Dropout(.5),
-
-            layers.Dense(self.num_of_classes, activation='softmax')
-        ])
+        outout = layers.Dense(self.y_shape, activation='softmax')(x)
+        self.model = tf.keras.Model(input, outout)
 
 
 class LstmModel(Model):
-    def create_model(self):
-        self.model = tf.keras.Sequential([
-            layers.InputLayer(input_shape=(self.num_of_frames, self.frame_size)),
-            layers.LSTM(256, recurrent_dropout=.5, dropout=.5, return_sequences=True),
-            layers.LSTM(256, recurrent_dropout=.5, dropout=.5, return_sequences=True),
+    def create_model(self, units=128, depth=2, dense_units=64, dropout=.5):
+        input = layers.Input(shape=self.X_shape)
+        x = layers.Reshape((self.X_shape[0], -1))(input)
 
-            layers.GlobalAveragePooling1D(),
+        for i in range(depth):
+            return_sequences = True if i != depth-1 else False
+            x = layers.LSTM(units, return_sequences=return_sequences,
+                            dropout=dropout, recurrent_dropout=dropout)(x)
 
-            layers.Dense(128),
-            layers.PReLU(),
-            layers.Dropout(.5),
+        x = layers.Dense(dense_units)(x)
+        x = layers.PReLU()(x)
+        x = layers.Dropout(dropout)(x)
 
-            layers.Dense(self.num_of_classes, activation='softmax')
-        ])
+        output = layers.Dense(self.y_shape, activation='softmax')(x)
+        self.model = tf.keras.Model(input, output)
 
 
 class TransModel(Model):
-    def create_model(self):
-        inputs = layers.Input(shape=(self.num_of_frames, self.frame_size))
+    def create_model(self, key_dim=64, num_heads=4):
+        input = layers.Input(shape=self.X_shape)
+        x = layers.Reshape((self.X_shape[0], -1))(input)
 
         # Attention and Normalization
-        res = inputs
-        x = layers.MultiHeadAttention(key_dim=256, num_heads=32,
-                                      dropout=.5)(inputs, inputs)
+        res = x
+        x = layers.MultiHeadAttention(key_dim=key_dim, num_heads=num_heads,
+                                      dropout=.5)(x, x)
         x = layers.Dropout(.5)(x)
         x = layers.LayerNormalization()(x)
         res += x
 
         # Feed Forward Part
-        x = layers.Conv1D(filters=512, kernel_size=1)(res)
+        x = layers.Conv1D(64, kernel_size=1)(res)
         x = layers.PReLU()(x)
         x = layers.Dropout(.5)(x)
 
@@ -206,7 +181,64 @@ class TransModel(Model):
         x = layers.LayerNormalization()(x)
         x += res
 
-        x = layers.GlobalAveragePooling1D()(x)
+        x = layers.Flatten()(x)
 
-        outputs = layers.Dense(self.num_of_classes, activation='softmax')(x)
-        self.model = tf.keras.Model(inputs, outputs)
+        output = layers.Dense(self.y_shape, activation='softmax')(x)
+        self.model = tf.keras.Model(input, output)
+
+
+class TestModel(Model):
+    def create_model(self):
+        input = layers.Input(shape=self.X_shape)
+
+        x = layers.TimeDistributed(layers.Conv1D(32, 65))(input)
+
+        # x = layers.TimeDistributed(layers.Conv1D(32, 16))(input)
+        # x = layers.ReLU()(x)
+
+        # x = layers.TimeDistributed(layers.Conv1D(32, 16))(x)
+        # x = layers.ReLU()(x)
+
+        # x = layers.TimeDistributed(layers.Conv1D(64, 16))(x)
+        # x = layers.ReLU()(x)
+
+        # x = layers.TimeDistributed(layers.Conv1D(64, 16))(x)
+        # x = layers.ReLU()(x)
+
+        # x = layers.TimeDistributed(layers.Conv1D(128, 5))(x)
+        # x = layers.ReLU()(x)
+
+        x = layers.Reshape((self.X_shape[0], -1))(x)
+
+        x = layers.LSTM(64, return_sequences=True,
+                        dropout=0.2, recurrent_dropout=0.2)(x)
+        x = layers.LSTM(64, dropout=0.2, recurrent_dropout=0.2)(x)
+
+        output = layers.Dense(self.y_shape, activation='softmax')(x)
+        self.model = tf.keras.Model(input, output)
+
+
+if __name__ == '__main__':
+    from sklearn.model_selection import train_test_split
+
+    from mmwave.data import Logger, Formats, DataGenerator, PolarPreprocessor
+
+
+    paths, y = Logger.get_paths()
+    paths = paths*500
+    y = y*500
+
+    train_paths, test_paths, y_train, y_test = train_test_split(paths, y, stratify=y,
+                                                                test_size=0.3)
+
+    val_paths, test_paths, y_val, y_test = train_test_split(test_paths, y_test,
+                                                            stratify=y_test,
+                                                            test_size=0.5)
+
+    formats = Formats('../mmwave/communication/profiles/profile.cfg')
+    preprocessor = PolarPreprocessor(formats)
+
+    model = ConvModel(preprocessor=preprocessor)
+    # model = LstmModel(preprocessor=preprocessor)
+    # model = TransModel(preprocessor=preprocessor)
+    model.train(train_paths, y_train, validation_data=(val_paths, y_val))
