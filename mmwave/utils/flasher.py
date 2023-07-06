@@ -81,10 +81,10 @@ class Flasher:
         self.connection.flush()
 
     def send_packet(self, command):
-        self.connection.write(OPCODE.SYNC, size=0)
-        self.connection.write(command.SIZE, size=0)
-        self.connection.write(command.CHECKSUM, size=0)
-        self.connection.write(command.CODE, size=0)
+        self.connection.port.write(OPCODE.SYNC)
+        self.connection.port.write(command.SIZE)
+        self.connection.port.write(command.CHECKSUM)
+        self.connection.port.write(command.CODE)
 
     def send_cmd(self, command, get_status=False, resp=True):
         self.send_packet(command)
@@ -97,7 +97,8 @@ class Flasher:
 
         if resp:
             return self.get_response()
-        return ''
+
+        return True
 
     def get_response(self):
         header = self.connection.read(3)
@@ -106,7 +107,7 @@ class Flasher:
 
         payload = self.connection.read(packet_size)
 
-        self.connection.write(OPCODE.ACK, size=0) # Ack the packet
+        self.connection.port.write(OPCODE.ACK) # Ack the packet
 
         calculated_checksum = sum(payload) & 0xff
         if (calculated_checksum != checksum):
@@ -116,10 +117,17 @@ class Flasher:
         return payload
 
     def get_ack(self, timeout):
-        length = b''
-        while length == b'':
+        length = None
+        while not length:
             length = self.connection.read(2)
             time.sleep(0.01)
+            # Some commands like erase flash are taking a lot of time so it's
+            # hard to determine if there is an error or a long cmd being executed.
+            # You might get stuck here if there is something wrong.
+            # TODO: Maybe add different timeouts for different commands, but again,
+            # stopping erase or write flash might as well be very dangerous
+            # and adding really big conservative timeouts are as good as making
+            # the user stop the command himself...
 
         self.connection.read(1) # Checksum
         self.connection.read(1) # 0x00
@@ -173,10 +181,10 @@ class Flasher:
 
             with open(file, 'rb') as f:
                 resp = self.send_cmd(CMD(OPCODE.OPEN_FILE,
-                                         data=(struct.pack('>I', file_size) +
-                                               Flasher.STORAGES[storage] +
-                                               list(Flasher.FILES.values())[file_id] +
-                                               struct.pack('>I', mirror_enabled))),
+                                         data=struct.pack('>I', file_size) +
+                                              Flasher.STORAGES[storage] +
+                                              list(Flasher.FILES.values())[file_id] +
+                                              struct.pack('>I', mirror_enabled)),
                                          get_status=True)
                 if resp != OPCODE.RET_SUCCESS:
                     error('Opening file failed.')
@@ -186,12 +194,13 @@ class Flasher:
                 offset = 0
                 while offset < file_size:
                     block = f.read(Flasher.BLOCK_SIZE)
-                    if (storage == 'SRAM'):
-                        resp = self.send_cmd(CMD(OPCODE.WRITE_FILE_RAM, data=block),
-                                             get_status=True)
+
+                    if storage == 'SRAM':
+                        code = OPCODE.WRITE_FILE_RAM
                     else:
-                        resp = self.send_cmd(CMD(OPCODE.WRITE_FILE, data=block),
-                                             get_status=True)
+                        code = OPCODE.WRITE_FILE
+
+                    resp = self.send_cmd(CMD(code, data=block), get_status=True)
 
                     if resp != OPCODE.RET_SUCCESS:
                         error('Sending file failed.')
