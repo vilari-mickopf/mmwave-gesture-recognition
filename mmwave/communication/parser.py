@@ -5,6 +5,7 @@ import struct
 import pprint
 from copy import deepcopy
 
+import numpy as np
 import pandas as pd
 
 from mmwave.utils.prints import print
@@ -88,6 +89,8 @@ class Parser:
             tlv_len = self.parse_value('I', echo=warn)
 
             if len(self.formats.tlvs) < tlv_index:
+                if warn:
+                    print(f'{Fore.RED}ERROR: Unknown tlv.')
                 return
 
             tlv_type = list(self.formats.tlvs)[tlv_index]
@@ -137,12 +140,12 @@ class Parser:
     def header_frame_num_check(self, header, echo=False):
         if self.frame_num != 0 and self.frame_num + 1 != header['frame_num']:
             if echo:
-                num_of_missed_frames = abs(header['frame_num'] - self.frame_num - 1)
-                print(f'{Fore.YELLOW}WARNING: Missed {num_of_missed_frames} ', end='')
-                if num_of_missed_frames > 1:
-                    print(f'{Fore.YELLOW}frames.')
+                num_of_missed_frames = header['frame_num'] - self.frame_num - 1
+                print(f'{Fore.YELLOW}WARNING: Missed {num_of_missed_frames} frame', end='')
+                if abs(num_of_missed_frames) > 1:
+                    print('s.')
                 else:
-                    print(f'{Fore.YELLOW}frame.')
+                    print('.')
         self.frame_num = header['frame_num']
 
     def len_check(self, received, expected, echo=False):
@@ -169,7 +172,8 @@ class Parser:
             doppler = doppler_idx * self.formats.doppler_resolution_mps
 
             range_val = obj['range_idx'] * self.formats.range_idx_to_meters
-            peak = obj['peak_value']/65535
+
+            peak = 10*np.log10(1+obj['peak_value'])
             x = self.convert_idx(obj['x_coord'], qformat=qformat)
             y = self.convert_idx(obj['y_coord'], qformat=qformat)
             z = self.convert_idx(obj['z_coord'], qformat=qformat)
