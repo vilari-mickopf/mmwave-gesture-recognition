@@ -3,22 +3,25 @@
 import time
 
 import numpy as np
-import pandas as pd
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 
-from mmwave.data.logger import Logger
+from mmwave.data import GESTURE
+
+import colorama
+from colorama import Fore
+colorama.init(autoreset=True)
 
 
 # Global plot config
 mpl.use('Qt5Agg')
 mpl.rcParams['toolbar'] = 'None'
-plt.style.use('seaborn-dark')
+plt.style.use('seaborn-v0_8-dark')
 
 
 class Plotter:
-    def __init__(self, queue):
+    def __init__(self, queue=None):
         self.queue = queue
 
         self.fig = None
@@ -74,7 +77,8 @@ class Plotter:
         self.sc.set_visible(True)
 
     def fig_close(self, event=None):
-        self.queue.put('closed')
+        if self.queue is not None:
+            self.queue.put('closed')
 
     def blit(self):
         self.fig.canvas.restore_region(self.background)
@@ -89,58 +93,28 @@ class Plotter:
         self.blit()
         plt.gcf().canvas.flush_events()
 
-    def get_previos_data(self, gesture):
-        last_sample = Logger.get_last_sample(gesture)
-        if last_sample[-1] == '/':
-            return None
-
-        df = pd.read_csv(last_sample).reset_index().values
-
-        num_of_frames = df[-1][1]+1
-        points = [[] for _ in range(num_of_frames)]
-        for row in df:
-            if row[2] == 'None' or row[3] == 'None':
-                points[row[1]].append((None, None))
-            else:
-                x, y = int(row[2]), int(row[3])
-                if x > 32767:
-                    x = x - 65536
-
-                if y > 32767:
-                    y = y - 65536
-
-                x = x/int(row[7])
-                y = y/int(row[7])
-
-                points[row[1]].append((x, y))
-        return points
-
-    def draw_last_sample(self, gesture):
-        self.sc.set_color([.5, .5, .5])
-        last_sample = self.get_previos_data(gesture)
-        print('Redrawing...')
+    def plot_sample(self, sample):
+        self.sc.set_color([1, 0, 0]) # Restore red color
+        print('Redrawing...', end='')
+        self.update()
+        for frame in sample:
+            objs = None if frame is None else [[obj['x'], obj['y']] for obj in frame]
+            self.update(objs)
+            time.sleep(.066)
 
         self.update()
-        for frame in last_sample:
-            self.update([[x, y] for x, y in frame])
-            time.sleep(.03)
+        print('Done.\n')
 
-        print('Done')
-
-        self.update()
-        self.sc.set_color([1, 0, 0])
+        self.sc.set_color([1, 0, 0]) # Restore red color
 
     def plot_detected_objs(self, frame):
-        points = []
+        points = None
         if frame and frame.get('tlvs', {}).get('detectedPoints') is not None:
             detected_points = frame['tlvs']['detectedPoints']
             assert detected_points['descriptor'].get('converted') == True
 
-            for obj in detected_points['objs']:
-                if not obj or None in obj.values():
-                    continue
-
-                points.append([obj['x'], obj['y']])
+            points = [[obj['x'], obj['y']] for obj in detected_points['objs']
+                      if not obj or None not in obj.values()]
 
         self.update(points)
 
@@ -150,4 +124,21 @@ class Plotter:
         plt.gcf().canvas.flush_events()
 
     def close(self):
-        plt.close()
+        plt.close(self.fig)
+
+
+if __name__ == '__main__':
+    gesture = GESTURE.UP
+
+    last_file = gesture.last_file()
+    if last_file is None:
+        print(f'{Fore.YELLOW}No samples for gesture {gesture.name}.')
+        exit()
+
+    sample = np.load(last_file, allow_pickle=True)['data']
+
+    plotter = Plotter()
+    plotter.init()
+    plotter.show()
+    plotter.plot_sample(sample)
+    plotter.close()
