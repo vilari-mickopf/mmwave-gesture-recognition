@@ -94,7 +94,11 @@ class Parser:
                 return
 
             tlv_type = list(self.formats.tlvs)[tlv_index]
-            tlvs[tlv_type] = self.parse_struct(self.formats.tlvs[tlv_type], echo=warn)
+            tlv = self.parse_struct(self.formats.tlvs[tlv_type], echo=warn)
+            if tlv is None:
+                return
+
+            tlvs[tlv_type] = tlv
 
         return {'header': header, 'tlvs': tlvs}
 
@@ -111,9 +115,14 @@ class Parser:
                     for i in size_idxs[1:]:
                         size = size[i]
 
-                    value = [self.parse_struct(value_format[1], echo) for _ in range(size)]
+                    value = [self.parse_struct(value_format[1], echo)
+                             for _ in range(size)]
                 else:
                     value = self.parse_value(value_format, echo)
+
+                if value is None:
+                    return
+
                 parsed_struct[key] = value
         else:
             parsed_struct = self.parse_value(struct_format, echo)
@@ -149,10 +158,7 @@ class Parser:
         self.frame_num = header['frame_num']
 
     def len_check(self, received, expected, echo=False):
-        if received is None:
-            return False
-
-        if received < expected:
+        if received is None or received < expected:
             if echo:
                 print(f'{Fore.RED}ERROR: Corrupted frame.')
             return False
