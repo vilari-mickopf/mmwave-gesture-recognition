@@ -7,9 +7,11 @@ import readline
 import binascii
 import queue
 import serial
+import pickle
 
 from cmd import Cmd
 
+import numpy as np
 from sklearn.model_selection import train_test_split
 
 from mmwave.communication import Connection, mmWave, Parser
@@ -48,13 +50,11 @@ class Console(Cmd):
         # Configuration
         self.config_dir = os.path.join(os.path.dirname(__file__),
                                        'mmwave/communication/profiles')
-        self._configured = None
         self.default_config = 'profile'
         self.config = None
         self.parser = None
 
         # Data logger
-        self.logger = Logger()
         self.data_dir = None
 
         # Model
@@ -96,15 +96,6 @@ class Console(Cmd):
         else:
             raise NotImplemented(model)
 
-    @property
-    def configured(self):
-        return self._configured
-
-    @configured.setter
-    def configured(self, value):
-        self._configured = value
-        self.parser = Parser(Formats(self.config)) if value else None
-
     def mmwave_init(self, cli_port, data_port, cli_rate, data_rate):
         self.mmwave = None
         if cli_port is None or data_port is None:
@@ -125,7 +116,9 @@ class Console(Cmd):
             if platform.system() == 'Windows':
                 ports.sort(reverse=True)
 
-        self.mmwave = mmWave(ports[0], ports[1],
+            cli_port, data_port = ports[0], ports[1]
+
+        self.mmwave = mmWave(cli_port, data_port,
                              cli_rate=cli_rate,
                              data_rate=data_rate)
         self.mmwave.connect()
@@ -304,18 +297,19 @@ class Console(Cmd):
             filepaths.append(filepath)
 
         print('Ping mmWave...', end='')
-        response = self.flasher.send_cmd(CMD(OPCODE.PING), resp=False)
-        if response is None:
+        if not self.flasher.send_cmd(CMD(OPCODE.PING), resp=False):
             warning('Check if SOP0 and SOP2 are closed, and reset the power.')
             return
         print(f'{Fore.GREEN}Done.')
 
         print('Get version...', end='')
-        response = self.flasher.send_cmd(CMD(OPCODE.GET_VERSION))
-        if response is None:
+        version = self.flasher.send_cmd(CMD(OPCODE.GET_VERSION))
+        if version is None:
+            error('Can\'t get version info. Aborting.')
             return
         print(f'{Fore.GREEN}Done.')
-        print(f'{Fore.BLUE}Version:', binascii.hexlify(response))
+
+        print(f'{Fore.BLUE}Version:', binascii.hexlify(version))
         print()
 
         self.flasher.flash(filepaths, erase=True)
@@ -466,30 +460,31 @@ class Console(Cmd):
             error('Unknown profile.')
             return
 
-        if not self.configured and os.path.basename(config) == 'start.cfg':
+        if not self.config and os.path.basename(config) == 'start.cfg':
             error('Can\'t start. mmWave not configured.')
             return
 
         mmwave_configured = self.mmwave.configure(config)
         if not mmwave_configured:
-            self.configured = False
             return
 
         if os.path.basename(config) == 'start.cfg':
             return
-        elif os.path.basename(config) == 'stop.cfg':
-            self.configured = False
-            if self.check_thread('listen'):
-                warning('Listen thread alredy started. Stopping...')
-                self.listen_thread.stop()
 
-        self.config = config
-        self.configured = False if os.path.basename(config) == 'stop.cfg' else True
+        elif os.path.basename(config) == 'stop.cfg':
+            if self.check_thread('listen'):
+                warning('Listen thread running. Stopping...')
+                self.do_stop('listen')
+            return
+
+        else:
+            self.config = config
+            self.formats = Formats(self.config)
+            self.parser = Parser(self.formats)
 
     def complete_configure(self, text, line, begidx, endidx):
-        completions = []
-        for file in glob.glob(os.path.join(self.config_dir, '*.cfg')):
-            completions.append('.'.join(os.path.basename(file).split('.')[:-1]))
+        completions = ['.'.join(os.path.basename(f).split('.')[:-1])
+                       for f in glob.glob(os.path.join(self.config_dir, '*.cfg'))]
 
         return self.complete_from_list(completions, text, line)
 
@@ -524,7 +519,7 @@ class Console(Cmd):
         >> get_model
         '''
 
-        print(f'Current model type: {self.model}')
+        print(f'Current model type: {self.model.__class__.__name__}')
 
     @argcheck()
     def do_listen(self, args=''):
@@ -540,7 +535,7 @@ class Console(Cmd):
         Usage:
         >> listen
         '''
-        if not self.configured:
+        if self.config is None:
             warning('mmWave not configured.')
             return
 
@@ -592,7 +587,7 @@ class Console(Cmd):
             opts.remove('listen')
 
         if 'mmwave' in opts:
-            if self.configured:
+            if self.config is not None:
                 self.do_configure('stop')
                 print('mmWave stopped.')
             opts.remove('mmwave')
@@ -664,7 +659,7 @@ class Console(Cmd):
             self.model.load()
             print()
 
-        self.predict_thread = PredictThread(self.model)
+        self.predict_thread = PredictThread(self.model, Logger())
         self.predict_thread.start()
         self.parse_thread.forward_to(self.predict_thread)
 
@@ -684,13 +679,11 @@ class Console(Cmd):
         >> start
         '''
 
-        if not self.model.loaded():
-            self.model.load()
-            print()
-
+        self.do_stop()
         self.do_configure()
         self.do_listen()
         self.do_plot()
+        self.model = 'conv'
         self.do_predict()
 
     @argcheck(max=1)
@@ -705,12 +698,23 @@ class Console(Cmd):
 
         # TODO: ability to set data dir
 
-        X, y = Logger.get_all_data()
-        Logger.get_stats(X, y)
-        X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=.3,
-                                                          stratify=y,
-                                                          random_state=12)
-        self.model.train(X_train, y_train, X_val, y_val)
+        paths, y = Logger.get_paths()
+        train_paths, test_paths, y_train, y_test = train_test_split(paths, y,
+                                                                    stratify=y,
+                                                                    test_size=.3,
+                                                                    random_state=12)
+
+        val_paths, test_paths, y_val, y_test = train_test_split(test_paths, y_test,
+                                                                stratify=y_test,
+                                                                test_size=.5,
+                                                                random_state=12)
+
+        preprocessor_path = os.path.join(self.model.dir, 'preprocessor')
+        if os.path.exists(preprocessor_path):
+            with open(preprocessor_path, 'wb') as f:
+                self.model.preprocessor = pickle.load(f)
+
+        self.model.train(train_paths, y_train, validation_data=(val_paths, y_val))
 
     @argcheck(max=1)
     def do_eval(self, args=''):
@@ -724,27 +728,12 @@ class Console(Cmd):
 
         # TODO: ability to set data dir
 
-        X, y = Logger.get_all_data()
-        Logger.get_stats(X, y)
-
-        X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=.3,
-                                                          stratify=y,
-                                                          random_state=12)
-
+        paths, y = Logger.get_paths()
         if not self.model.loaded():
             self.model.load()
             print()
 
-        print('Eval validation dataset:')
-        self.model.evaluate(X_val, y_val)
-        print()
-
-        print('Eval train dataset:')
-        self.model.evaluate(X_train, y_train)
-        print()
-
-        print('Eval full dataset:')
-        self.model.evaluate(X, y)
+        self.model.evaluate(paths, y)
         print()
 
     def complete_eval(self, text, line, begidx, endidx):
@@ -771,14 +760,12 @@ class Console(Cmd):
             warning(f'Unknown argument: {args}')
             return
 
-        self.log_thread = LogThread(self.logger, GESTURE[args])
+        self.log_thread = LogThread(Logger(), GESTURE[args])
         self.log_thread.start()
         self.parse_thread.forward_to(self.log_thread)
 
     def complete_gestures(self, text, line):
-        completions = []
-        for gesture in GESTURE:
-            completions.append(gesture.name.lower())
+        completions = [gesture.name.lower() for gesture in GESTURE]
         return self.complete_from_list(completions, text, line)
 
     def complete_log(self, text, line, begidx, endidx):
@@ -803,7 +790,7 @@ class Console(Cmd):
             error(f'Unknown gesture: {args}')
             return
 
-        self.logger.discard_last_sample(args)
+        Logger().discard_last_sample(args)
 
     def complete_remove(self, text, line, begidx, endidx):
         return self.complete_gestures(text, line)
@@ -828,7 +815,15 @@ class Console(Cmd):
             error(f'Unknown gesture: {args}')
             return
 
-        self.plot_thread.send_to_main(self.plotter.draw_last_sample, GESTURE[args])
+        gesture = args if isinstance(args, GESTURE) else GESTURE[args]
+
+        last_file = gesture.last_file()
+        if last_file is None:
+            print(f'{Fore.YELLOW}No samples for gesture {gesture.name}.')
+            return
+
+        last_sample = np.load(last_file, allow_pickle=True)['data']
+        self.plot_thread.send_to_main(self.plotter.plot_sample, last_sample)
 
     def complete_redraw(self, text, line, begidx, endidx):
         return self.complete_gestures(text, line)
