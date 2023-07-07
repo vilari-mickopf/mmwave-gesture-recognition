@@ -8,7 +8,7 @@ from copy import deepcopy
 import numpy as np
 import pandas as pd
 
-from mmwave.utils.prints import print
+from mmwave.utils.prints import print, warning, error
 
 import colorama
 from colorama import Fore
@@ -69,45 +69,59 @@ class Parser:
     def parse(self, frame, warn=False):
         self.frame = frame
 
-        header = self.parse_struct(self.formats.header, echo=warn)
+        header = self.parse_struct(self.formats.header)
         if header is None:
             return
 
-        if not self.len_check(header['packet_len'], len(frame), echo=warn):
+        if not self.len_check(header['packet_len'], len(frame)):
+            if warn:
+                error(f'ERROR: Corrupted frame.')
             return
 
         if header['num_tlvs'] is None:
             if warn:
-                print(f'{Fore.RED}ERROR: Corrupted frame.')
+                error(f'ERROR: Corrupted frame.')
             return
 
         self.header_frame_num_check(header, echo=warn)
 
         tlvs = {}
         for tlv in range(header['num_tlvs']):
-            tlv_index = int(self.parse_value('I', echo=warn)) - 1
-            tlv_len = self.parse_value('I', echo=warn)
-
-            if len(self.formats.tlvs) < tlv_index:
+            tlv_index = self.parse_value('I')
+            if tlv_index is None:
                 if warn:
-                    print(f'{Fore.RED}ERROR: Unknown tlv.')
+                    error(f'ERROR: Corrupted frame.')
+                return
+
+            tlv_index = int(tlv_index) - 1
+            if len(self.formats.tlvs) <= tlv_index:
+                if warn:
+                    error(f'ERROR: Unknown tlv index {tlv_index}.')
+                return
+
+            tlv_len = self.parse_value('I')
+            if tlv_len is None:
+                if warn:
+                    error(f'ERROR: Corrupted frame.')
                 return
 
             tlv_type = list(self.formats.tlvs)[tlv_index]
-            tlv = self.parse_struct(self.formats.tlvs[tlv_type], echo=warn)
+            tlv = self.parse_struct(self.formats.tlvs[tlv_type])
             if tlv is None:
+                if warn:
+                    error(f'ERROR: Corrupted frame.')
                 return
 
             tlvs[tlv_type] = tlv
 
         return {'header': header, 'tlvs': tlvs}
 
-    def parse_struct(self, struct_format, echo=False):
+    def parse_struct(self, struct_format):
         if isinstance(struct_format, dict):
             parsed_struct = {}
             for key, value_format in struct_format.items():
                 if isinstance(value_format, dict):
-                    value = self.parse_struct(value_format, echo)
+                    value = self.parse_struct(value_format)
 
                 elif isinstance(value_format, list):
                     size_idxs = value_format[0].split('.')
@@ -115,23 +129,23 @@ class Parser:
                     for i in size_idxs[1:]:
                         size = size[i]
 
-                    value = [self.parse_struct(value_format[1], echo)
+                    value = [self.parse_struct(value_format[1])
                              for _ in range(size)]
                 else:
-                    value = self.parse_value(value_format, echo)
+                    value = self.parse_value(value_format)
 
-                if value is None:
+                if value is None or (isinstance(value, list) and None in value):
                     return
 
                 parsed_struct[key] = value
         else:
-            parsed_struct = self.parse_value(struct_format, echo)
+            parsed_struct = self.parse_value(struct_format)
 
         return parsed_struct
 
-    def parse_value(self, value_format, echo=False):
+    def parse_value(self, value_format):
         size = struct.calcsize(value_format)
-        if not self.len_check(len(self.frame), size, echo=echo):
+        if not self.len_check(len(self.frame), size):
             return
 
         value = struct.unpack(value_format, self.frame[:size])
@@ -150,19 +164,15 @@ class Parser:
         if self.frame_num != 0 and self.frame_num + 1 != header['frame_num']:
             if echo:
                 num_of_missed_frames = header['frame_num'] - self.frame_num - 1
-                print(f'{Fore.YELLOW}WARNING: Missed {num_of_missed_frames} frame', end='')
+                warning(f'WARNING: Missed {num_of_missed_frames} frame', end='')
                 if abs(num_of_missed_frames) > 1:
                     print('s.')
                 else:
                     print('.')
         self.frame_num = header['frame_num']
 
-    def len_check(self, received, expected, echo=False):
-        if received is None or received < expected:
-            if echo:
-                print(f'{Fore.RED}ERROR: Corrupted frame.')
-            return False
-        return True
+    def len_check(self, received, expected):
+        return not (received is None or received < expected)
 
     def convert_idx(self, x, qformat=0):
         if x > 32767:
