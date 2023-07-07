@@ -5,7 +5,13 @@ import queue
 import threading
 from abc import ABC, abstractmethod
 
-from mmwave.data import Formats
+import numpy as np
+
+from mmwave.data import Formats, GESTURE
+
+import colorama
+from colorama import Fore
+colorama.init(autoreset=True)
 
 
 def threaded(fn):
@@ -127,62 +133,31 @@ class PrintThread(Thread):
 
 
 class PredictThread(Thread):
-    def __init__(self, model):
+    def __init__(self, model, logger, timeout=.5):
         super().__init__()
         self.model = model
+        self.logger = logger
+        self.timeout = timeout
 
-        self.collecting = False
-        self.sequence = []
+        self.data = None
         self.empty_frames = []
         self.detected_time = time.perf_counter()
         self.frame_num = 0
 
     def process(self):
         frame = self.collect()
-        if not self.collecting:
-            self.collecting = True
-            self.sequence = []
-            self.detected_time = time.perf_counter()
+        data = self.logger.log(frame, echo=False)
+        if data is None:
+            return
 
-        if frame and frame.get('tlvs', {}).get('detectedPoints'):
-            self.detected_time = time.perf_counter()
-            if self.frame_num == 0:
-                self.sequence = []
+        if sum(1 for frame in data if frame is not None) <= 3:
+            return
 
-            for empty_frame in self.empty_frames:
-                self.sequence.append(empty_frame)
-                self.empty_frames = []
-
-            objs = []
-            for obj in frame['tlvs']['detectedPoints']['objs']:
-                if obj is None or None in obj.values():
-                    continue
-                objs.append([
-                    obj['x_coord']/65535.,
-                    obj['y_coord']/65535.,
-                    obj['range_idx']/65535.,
-                    obj['peak_value']/65535.,
-                    obj['doppler_idx']/65535.
-                ])
-            self.sequence.append(objs)
-            self.frame_num += 1
-
-            if self.frame_num >= self.num_of_frames:
-                self.empty_frames = []
-                self.collecting = False
-                self.frame_num = 0
-
-        elif self.frame_num != 0:
-            self.empty_frames.append([[0.]*self.num_of_data_in_obj])
-            self.frame_num += 1
-
-        if time.perf_counter() - self.detected_time > .5:
-            self.empty_frames = []
-            self.collecting = False
-            self.frame_num = 0
-
-            if len(self.sequence) > 3:
-                self.model.predict([self.sequence])
+        pred = self.model.predict(data)
+        if pred[np.argmax(pred)] > .8:
+            print(f'{Fore.GREEN}Gesture recognized:', end=' ')
+            print(f'{Fore.BLUE}{GESTURE[int(np.argmax(pred))]}')
+            print(f'{Fore.CYAN}{"="*30}\n')
 
 
 class LogThread(Thread):
@@ -193,7 +168,7 @@ class LogThread(Thread):
 
     def process(self):
         frame = self.collect()
-        data = self.logger.log(frame)
+        data = self.logger.log(frame, echo=True)
         if data is not None:
             self.logger.save(self.gesture, data)
             self.stop()

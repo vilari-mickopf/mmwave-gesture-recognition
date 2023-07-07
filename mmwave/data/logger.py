@@ -5,7 +5,6 @@ import glob
 import time
 
 import numpy as np
-from tqdm import tqdm
 
 from mmwave.data import GESTURE
 from mmwave.utils.prints import print, warning
@@ -27,13 +26,14 @@ class Logger:
         self.empty_frames_cnt = 0
         self.timeout = self.start_timeout
 
-    def log(self, frame):
+    def log(self, frame, echo=False):
         if self.data is None:
             self.data = []
             self.detected_time = time.perf_counter()
             self.timeout = self.start_timeout
             self.empty_frames_cnt = 0
-            print(f'Saving sample...')
+            if echo:
+                print('Saving sample...')
 
         if frame and frame.get('tlvs', {}).get('detectedPoints'):
             self.timeout = self.end_timeout
@@ -54,7 +54,8 @@ class Logger:
 
         return None
 
-    def save(self, gesture, data):
+    @staticmethod
+    def save(gesture, data):
         gesture = gesture if isinstance(gesture, GESTURE) else GESTURE[gesture]
         if not data:
             warning('Nothing to save.\n')
@@ -70,7 +71,8 @@ class Logger:
         np.savez_compressed(gesture.next_file(), data=np.array(data, dtype=object))
         print(f'{Fore.GREEN}Sample saved.\n')
 
-    def discard_last_sample(self, gesture):
+    @staticmethod
+    def discard_last_sample(gesture):
         last_sample = gesture.last_file()
         if last_sample is None:
             print('No files.')
@@ -86,29 +88,36 @@ class Logger:
         return X, y
 
     @staticmethod
+    def _get_paths(gesture):
+        if not isinstance(gesture, GESTURE):
+            gesture = GESTURE[gesture]
+
+        paths, y = [], []
+        if not os.path.exists(gesture.dir):
+            return paths, y
+
+        for f in glob.glob(f'{gesture.dir}/**/*.npz', recursive=True):
+            paths.append(f)
+            y.append(gesture.value)
+
+        return paths, y
+
+    @staticmethod
     def get_paths(gesture=None):
-        X_paths, y = [], []
-        if gesture is None:
-            for gesture in tqdm(GESTURE, desc='Gestures'):
-                paths = Logger.get_paths(gesture)
-                if paths is None:
-                    continue
+        if gesture is not None:
+            return Logger._get_paths(gesture)
 
-                Xi_paths, yi = paths
-                X_paths.extend(Xi_paths)
-                y.extend(yi)
-        else:
-            if not isinstance(gesture, GESTURE):
-                gesture = GESTURE[gesture]
+        # Get all gestures instead
+        paths, y = [], []
+        for gesture in GESTURE:
+            gesture_paths, labels = Logger._get_paths(gesture)
+            if not gesture_paths or not labels:
+                continue
 
-            if not os.path.exists(gesture.dir):
-                return
+            paths.extend(gesture_paths)
+            y.extend(labels)
 
-            for f in glob.glob(f'{gesture.dir}/**/*.npz', recursive=True):
-                X_paths.append(f)
-                y.append(gesture.value)
-
-        return X_paths, y
+        return paths, y
 
     @staticmethod
     def get_stats(X, y):
