@@ -229,6 +229,45 @@ class Formats:
         self.header = self.config_header()
         self.tlvs = self.config_tlvs()
 
+    def get_antenna_num(self, bitmap):
+        num = 0
+        for i in range(int(np.floor(np.log2(bitmap)) + 1)):
+            num += (bitmap >> i) & 1
+        return num
+
+    def get_params(self):
+        channel_cfg = self.config['channelCfg']
+        self.rx = self.get_antenna_num(channel_cfg['rxAntBitmap'])
+        self.tx = self.get_antenna_num(channel_cfg['txAntBitmap'])
+
+        frame_cfg = self.config['frameCfg']
+        self.chirps_per_frame = frame_cfg['chirpEndIdx']
+        self.chirps_per_frame -= frame_cfg['chirpStartIdx'] - 1
+        self.chirps_per_frame *= frame_cfg['nLoops']
+
+        profile_cfg = self.config['profileCfg']
+        self.range_bins = int(2**np.ceil(np.log2(profile_cfg['numAdcSamples'])))
+        self.doppler_bins = self.chirps_per_frame//self.tx
+
+        range_factor = 300 * profile_cfg['digOutSampleRate']
+        range_factor /= 2 * profile_cfg['freqSlopeConst'] * 1e3
+        self.range_resolution_meters = range_factor/profile_cfg['numAdcSamples']
+        self.range_idx_to_meters = range_factor/self.range_bins
+
+        ramp_time = profile_cfg['idleTime'] + profile_cfg['rampEndTime']
+
+        self.doppler_resolution_mps = 3e8
+        self.doppler_resolution_mps /= 2 * profile_cfg['startFreq'] * 1e9
+        self.doppler_resolution_mps /= 1e-6 * self.chirps_per_frame
+        self.doppler_resolution_mps /= ramp_time
+
+        self.max_range = 300 * 0.8 * profile_cfg['digOutSampleRate']
+        self.max_range /= 2 * profile_cfg['freqSlopeConst'] * 1e3
+
+        self.max_velocity = 3e8
+        self.max_velocity /= 4 * profile_cfg['startFreq'] * 1e9 * 1e-6
+        self.max_velocity /= self.tx * ramp_time
+
     def parse(self, config_file):
         format = self.PROFILE_CFG_FORMAT
 
@@ -259,66 +298,26 @@ class Formats:
     def config_tlvs(self):
         format = deepcopy(self.TLVS_FORMAT)
 
-        num_adc_samples = self.config['profileCfg']['numAdcSamples']
-        num_range_bins = self.num_range_bins
-        if (num_range_bins - num_adc_samples) >= (num_adc_samples - num_range_bins/2):
-            num_range_bins //= 2
+        adc_samples = self.config['profileCfg']['numAdcSamples']
+        range_bins = self.range_bins
+        if range_bins - adc_samples >= adc_samples - range_bins/2:
+            range_bins //= 2
 
         # Size: RangeBins
-        format['rangeProfile'] %= str(num_range_bins)
+        format['rangeProfile'] %= str(range_bins)
+
         # Size: RangeBins
-        format['noiseProfile'] %= str(num_range_bins)
+        format['noiseProfile'] %= str(range_bins)
 
         # Size: RangeBins * num_virtual_antennas
-        format['rangeAzimuthHeatMap'] %= str(num_range_bins *
-                                             self.num_rx * self.num_tx)
+        format['rangeAzimuthHeatMap'] %= str(range_bins * self.rx * self.tx)
 
         # Size: RangeBins * DopplerBins
         frame_cfg = self.config['frameCfg']
         chirps_per_frame = frame_cfg['chirpEndIdx'] - frame_cfg['chirpStartIdx']
-        format['rangeDopplerHeatMap'] %= str(num_range_bins *
-                                             chirps_per_frame//self.num_tx)
+        format['rangeDopplerHeatMap'] %= str(range_bins * chirps_per_frame//self.tx)
 
         return format
-
-    def get_antenna_num(self, bitmap):
-        antenna_num = 0
-        for i in range(int(np.floor(np.log2(bitmap)) + 1)):
-            antenna_num += (bitmap >> i) & 1
-        return antenna_num
-
-    def get_params(self):
-        channel_cfg = self.config['channelCfg']
-        self.num_rx = self.get_antenna_num(channel_cfg['rxAntBitmap'])
-        self.num_tx = self.get_antenna_num(channel_cfg['txAntBitmap'])
-
-        frame_cfg = self.config['frameCfg']
-        self.num_chirps_per_frame = frame_cfg['chirpEndIdx']
-        self.num_chirps_per_frame -= frame_cfg['chirpStartIdx'] - 1
-        self.num_chirps_per_frame *= frame_cfg['nLoops']
-
-        profile_cfg = self.config['profileCfg']
-        self.num_range_bins = int(2**np.ceil(np.log2(profile_cfg['numAdcSamples'])))
-        self.num_doppler_bins = self.num_chirps_per_frame//self.num_tx
-
-        range_factor = 300 * profile_cfg['digOutSampleRate']
-        range_factor /= 2 * profile_cfg['freqSlopeConst'] * 1e3
-        self.range_resolution_meters = range_factor/profile_cfg['numAdcSamples']
-        self.range_idx_to_meters = range_factor/self.num_range_bins
-
-        ramp_time = profile_cfg['idleTime'] + profile_cfg['rampEndTime']
-
-        self.doppler_resolution_mps = 3e8
-        self.doppler_resolution_mps /= 2 * profile_cfg['startFreq'] * 1e9
-        self.doppler_resolution_mps /= 1e-6 * self.num_chirps_per_frame
-        self.doppler_resolution_mps /= ramp_time
-
-        self.max_range = 300 * 0.8 * profile_cfg['digOutSampleRate']
-        self.max_range /= 2 * profile_cfg['freqSlopeConst'] * 1e3
-
-        self.max_velocity = 3e8
-        self.max_velocity /= 4 * profile_cfg['startFreq'] * 1e9 * 1e-6
-        self.max_velocity /= self.num_tx * ramp_time
 
 
 class GESTURE_META(EnumMeta):
@@ -341,7 +340,8 @@ class GESTURE_META(EnumMeta):
 
 
 class GESTURE(Enum, metaclass=GESTURE_META):
-    UP = 0
+    NONE = 0
+    UP = auto()
     DOWN = auto()
     LEFT = auto()
     RIGHT = auto()
@@ -361,7 +361,7 @@ class GESTURE(Enum, metaclass=GESTURE_META):
         self._dir = path
 
     def last_file(self):
-        if not os.listdir(self.dir):
+        if not os.path.exists(self.dir) or not os.listdir(self.dir):
             return
 
         nums = []
