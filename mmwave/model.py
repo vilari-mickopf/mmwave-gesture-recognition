@@ -41,13 +41,13 @@ class Model(ABC):
 
     def get_callbacks(self):
         model_callbacks = [
-            callbacks.ReduceLROnPlateau(factor=.5, patience=10, verbose=1),
-            callbacks.EarlyStopping(patience=30, restore_best_weights=True)
+            callbacks.ReduceLROnPlateau(factor=.5, patience=5, verbose=1),
+            callbacks.EarlyStopping(patience=15, restore_best_weights=True)
         ]
         return model_callbacks
 
-    def train(self, train_paths, y_train, validation_data=None):
-        train_data = DataGenerator(train_paths, y_train,
+    def train(self, train_paths, y_train, validation_data=None, batch_size=32):
+        train_data = DataGenerator(train_paths, y_train, batch_size=batch_size,
                                    preprocessor=self.preprocessor,
                                    repeat=True, shuffle=True)
 
@@ -71,7 +71,7 @@ class Model(ABC):
                            optimizer='adam',
                            metrics=['categorical_accuracy'])
 
-        history = self.model.fit(train_data(buffer_size=300), epochs=5,
+        history = self.model.fit(train_data(buffer_size=300), epochs=500,
                                  steps_per_epoch=len(train_data),
                                  validation_data=validation_data,
                                  validation_steps=validation_steps,
@@ -86,7 +86,7 @@ class Model(ABC):
 
     def load(self):
         print('Loading model...', end='')
-        self.model = tf.keras.models.load_model(self.dir)
+        self.model = tf.keras.models.load_model(os.path.join(self.dir, 'model.h5'))
 
         with open(os.path.join(self.dir, 'preprocessor'), 'rb') as f:
             self.preprocessor = pickle.load(f)
@@ -173,7 +173,7 @@ class LstmModel(Model):
         for i in range(depth):
             return_sequences = True if i != depth-1 else False
             x = layers.LSTM(units, return_sequences=return_sequences,
-                            dropout=dropout, recurrent_dropout=dropout)(x)
+                            recurrent_dropout=dropout, dropout=dropout)(x)
 
         if dense_units > 0:
             x = layers.Dense(dense_units)(x)
@@ -183,39 +183,58 @@ class LstmModel(Model):
         self.model = tf.keras.Model(input, self.output(x))
 
 
+class PositionalEncoding(layers.Layer):
+    def get_angles(self, pos, i, d_model):
+        i, d_model = tf.cast(i, tf.float32), tf.cast(d_model, tf.float32)
+        return pos/tf.pow(10000.0, (2*(i//2))/d_model)
+
+    def call(self, input):
+        batch_size = tf.shape(input)[0]
+        num_of_frames = tf.shape(input)[1]
+        num_of_objs = tf.shape(input)[2]
+        d_model = tf.shape(input)[3]
+
+        angles = self.get_angles(
+            tf.range(num_of_frames, dtype=tf.float32)[:, tf.newaxis],
+            tf.range(d_model, dtype=tf.float32)[tf.newaxis, :],
+            d_model
+        )
+
+        encoding = tf.stack([tf.math.sin(angles[:, 0::2]),
+                             tf.math.cos(angles[:, 1::2])], axis=-1)
+        encoding = tf.reshape(encoding, shape=(angles.shape[0], -1))
+
+        encoding = tf.tile(encoding[tf.newaxis, :, tf.newaxis],
+                           [batch_size, 1, num_of_objs, 1])
+
+        return input + encoding
+
+
 class TransModel(Model):
-    def positional_encoding(self):
-        num_frames = np.arange(self.X_shape[0])[:, np.newaxis]
-
-        # i = 0
-        i = self.X_shape[1]*self.X_shape[2]/2 - 1
-        angle_rads = num_frames/np.power(10000, 2*i/(self.X_shape[1]*self.X_shape[2]))
-        angle_rads[:, 0::2] = np.sin(angle_rads[:, 0::2])
-        angle_rads[:, 1::2] = np.cos(angle_rads[:, 1::2])
-
-        return np.tile(angle_rads[:, np.newaxis, :], (1, self.X_shape[1], 1))
-
-    def create_model(self, key_dim=128, num_heads=8, depth=1, units=64, dropout=.5):
+    def create_model(self, key_dim=128, num_heads=4, depth=1, filters=64, dropout=.5):
         input = layers.Input(shape=self.X_shape)
-        x = layers.Reshape((self.X_shape[0], -1))(input)
-        x = input + self.positional_encoding()
+        x = PositionalEncoding()(input)
+        x = layers.Reshape((self.X_shape[0], -1))(x)
 
         # Attention and Normalization
         for _ in range(depth):
             res = x
             x = layers.MultiHeadAttention(key_dim=key_dim, num_heads=num_heads,
                                           dropout=dropout)(x, x)
-            x = layers.Dropout(dropout)(x)
+            x += res
+            x = layers.LayerNormalization()(x)
+
+        # Feed-forward
+        if filters > 0:
+            res = x
+            x = layers.Conv1D(filters=filters, kernel_size=3, padding='same')(x)
+            x = layers.ReLU()(x)
+
+            x = layers.Conv1D(filters=res.shape[-1], kernel_size=1)(x)
             x += res
             x = layers.LayerNormalization()(x)
 
         x = layers.Flatten()(x)
-
-        if units > 0:
-            x = layers.Dense(units)(x)
-            x = layers.ReLU()(x)
-            x = layers.Dropout(dropout)(x)
-
         self.model = tf.keras.Model(input, self.output(x))
 
 
@@ -226,7 +245,6 @@ if __name__ == '__main__':
     from mmwave.data.preprocessor import Polar, ZeroPadd
 
     paths, y = Logger.get_paths()
-
     train_paths, test_paths, y_train, y_test = train_test_split(paths, y, stratify=y,
                                                                 test_size=.3,
                                                                 random_state=12)
@@ -236,10 +254,11 @@ if __name__ == '__main__':
                                                             test_size=.5,
                                                             random_state=12)
 
-    formats = Formats('../mmwave/communication/profiles/profile.cfg')
-    preprocessor = [Polar(formats), ZeroPadd()]
+    config = os.path.join(os.path.dirname(__file__),
+                          'communication/profiles/profile.cfg')
+    preprocessor = [Polar(Formats(config)), ZeroPadd()]
 
-    model = ConvModel(preprocessor=preprocessor)
+    # model = ConvModel(preprocessor=preprocessor)
     # model = LstmModel(preprocessor=preprocessor)
-    # model = TransModel(preprocessor=preprocessor)
+    model = TransModel(preprocessor=preprocessor)
     model.train(train_paths, y_train, validation_data=(val_paths, y_val))

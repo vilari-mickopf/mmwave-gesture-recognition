@@ -11,7 +11,7 @@ from mmwave.data import GESTURE
 
 
 class DataGenerator:
-    def __init__(self, paths, y, preprocessor=None, batch_size=32,
+    def __init__(self, paths, y, preprocessor=None, batch_size=1,
                        shuffle=False, repeat=False):
         self.paths = paths
         self.y = y

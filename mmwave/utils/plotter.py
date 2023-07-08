@@ -94,7 +94,8 @@ class Plotter:
         plt.gcf().canvas.flush_events()
 
     def plot_sample(self, sample):
-        self.sc.set_color([1, 0, 0]) # Restore red color
+        self.sc.set_color([.5, .5, .5]) # Set gray color
+
         print('Redrawing...', end='')
         self.update()
         for frame in sample:
