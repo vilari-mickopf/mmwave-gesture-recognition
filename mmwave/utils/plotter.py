@@ -94,7 +94,7 @@ class Plotter:
         plt.gcf().canvas.flush_events()
 
     def plot_sample(self, sample):
-        self.sc.set_color([.5, .5, .5]) # Set gray color
+        self.sc.set_color([.5, .5, .5])
 
         print('Redrawing...', end='')
         self.update()
@@ -104,9 +104,8 @@ class Plotter:
             time.sleep(.066)
 
         self.update()
+        self.sc.set_color([1, 0, 0])
         print('Done.\n')
-
-        self.sc.set_color([1, 0, 0]) # Restore red color
 
     def plot_detected_objs(self, frame):
         points = None
@@ -129,7 +128,7 @@ class Plotter:
 
 
 if __name__ == '__main__':
-    gesture = GESTURE.UP
+    gesture = GESTURE.CCW
 
     last_file = gesture.last_file()
     if last_file is None:
