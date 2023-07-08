@@ -73,6 +73,8 @@ class Logger:
 
     @staticmethod
     def discard_last_sample(gesture):
+        gesture = gesture if isinstance(gesture, GESTURE) else GESTURE[gesture]
+
         last_sample = gesture.last_file()
         if last_sample is None:
             print('No files.')
