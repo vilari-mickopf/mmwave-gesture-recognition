@@ -293,7 +293,7 @@ class Formats:
         return config
 
     def config_header(self):
-        return self.HEADER_FORMAT
+        return deepcopy(self.HEADER_FORMAT)
 
     def config_tlvs(self):
         format = deepcopy(self.TLVS_FORMAT)
@@ -325,7 +325,8 @@ class GESTURE_META(EnumMeta):
         if isinstance(index_or_name, str):
             return super().__getitem__(index_or_name.upper())
 
-        elif isinstance(index_or_name, int) and index_or_name < super().__len__():
+        index_or_name = int(index_or_name)
+        if index_or_name < super().__len__():
             return list(self)[index_or_name]
 
     def __contains__(cls, index_or_name):
@@ -335,8 +336,8 @@ class GESTURE_META(EnumMeta):
         if isinstance(index_or_name, str):
             return index_or_name.upper() in cls.__members__.keys()
 
-        elif isinstance(index_or_name, int):
-            return index_or_name in [v.value for v in cls.__members__.values()]
+        index_or_name = int(index_or_name)
+        return index_or_name in [v.value for v in cls.__members__.values()]
 
 
 class GESTURE(Enum, metaclass=GESTURE_META):
@@ -347,9 +348,9 @@ class GESTURE(Enum, metaclass=GESTURE_META):
     RIGHT = auto()
     CW = auto()
     CCW = auto()
-    Z = auto()
-    S = auto()
-    X = auto()
+    # Z = auto()
+    # S = auto()
+    # X = auto()
 
     @property
     def dir(self):
