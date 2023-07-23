@@ -15,8 +15,9 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 
 from mmwave.communication import Connection, mmWave, Parser
-from mmwave.data import Formats, GESTURE, Logger
-from mmwave.model import ConvModel, LstmModel, TransModel
+from mmwave.data import Formats, GESTURE, Logger, DataLoader
+from mmwave.model import Conv1DModel, Conv2DModel, ResNet1DModel, ResNet2DModel
+from mmwave.model import LstmModel, TransModel
 from mmwave.utils import Plotter, print, error, warning
 from mmwave.utils.flasher import Flasher, CMD, OPCODE
 
@@ -822,7 +823,7 @@ class Console(Cmd):
             print(f'{Fore.YELLOW}No samples for gesture {gesture.name}.')
             return
 
-        last_sample = np.load(last_file, allow_pickle=True)['data']
+        last_sample = DataLoader(last_file).load()
         self.plot_thread.send_to_main(self.plotter.plot_sample, last_sample)
 
     def complete_redraw(self, text, line, begidx, endidx):

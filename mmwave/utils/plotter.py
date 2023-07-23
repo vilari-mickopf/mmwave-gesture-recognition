@@ -7,7 +7,7 @@ import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 
-from mmwave.data import GESTURE
+from mmwave.data import GESTURE, DataLoader
 
 import colorama
 from colorama import Fore
@@ -140,5 +140,5 @@ if __name__ == '__main__':
     plotter = Plotter()
     plotter.init()
     plotter.show()
-    plotter.plot_sample(sample)
+    plotter.plot_sample(DataLoader(last_file).load())
     plotter.close()

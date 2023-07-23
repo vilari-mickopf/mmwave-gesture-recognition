@@ -5,15 +5,19 @@ from copy import deepcopy
 import numpy as np
 
 import sklearn
+
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 import tensorflow as tf
 
 from mmwave.data import GESTURE
+from mmwave.data import DataLoader
 
 
 class DataGenerator:
     def __init__(self, paths, y, preprocessor=None, batch_size=1,
-                       shuffle=False, repeat=False):
+                       shuffle=False, repeat=False, loader=DataLoader):
         self.paths = paths
+        self.loader = loader
         self.y = y
 
         self.preprocessor = preprocessor
@@ -24,16 +28,16 @@ class DataGenerator:
         self.repeat = repeat
         self.shuffle = shuffle
 
-        self.X_shape = self.load(self.paths[0]).shape
+        X_sample = self.loader(self.paths[0]).load()
+        self.X_shape = self.preprocess(X_sample).shape
         self.y_shape = self.get_target(y[0]).shape
 
-    def load(self, path, preprocess=True):
-        data = np.load(path, allow_pickle=True)['data']
-        if preprocess and self.preprocessor is not None:
+    def preprocess(self, data):
+        if self.preprocessor is not None:
             for p in self.preprocessor:
                 data = p.process(data)
 
-        return data
+        return np.array(data)
 
     def get_target(self, label):
         return tf.keras.utils.to_categorical(label, num_classes=len(GESTURE))
@@ -46,7 +50,9 @@ class DataGenerator:
             paths, labels = sklearn.utils.shuffle(paths, labels)
 
         while True:
-            yield self.load(paths[file_index]), self.get_target(labels[file_index])
+            X = self.loader(paths[file_index]).load()
+            y = self.get_target(labels[file_index])
+            yield self.preprocess(X), y
 
             file_index = (file_index + 1) % len(paths)
             if file_index == 0:

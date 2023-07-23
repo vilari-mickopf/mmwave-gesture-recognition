@@ -6,7 +6,7 @@ import time
 
 import numpy as np
 
-from mmwave.data import GESTURE
+from mmwave.data import GESTURE, DataLoader
 from mmwave.utils.prints import print, warning
 
 import colorama
@@ -86,7 +86,7 @@ class Logger:
     @staticmethod
     def get_data(gesture=None):
         X_paths, y = Logger.get_paths(gesture)
-        X = [np.load(path, allow_pickle=True)['data'] for path in X_paths]
+        X = [DataLoader(path).load() for path in X_paths]
         return X, y
 
     @staticmethod
