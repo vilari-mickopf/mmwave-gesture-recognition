@@ -42,6 +42,7 @@ class Plotter:
         self.fig, self.ax = plt.subplots()
         self.sc = self.ax.scatter([], [], color='r', picker=10, animated=True)
 
+        # Ticks with resolution of 25cm
         self.ax.grid(False)
         plt.xticks(np.arange(-1, 1.01, step=.25),
                    ('-1m', '-0.75m', '-0.5m', '-0.25m',
@@ -93,8 +94,8 @@ class Plotter:
         self.blit()
         plt.gcf().canvas.flush_events()
 
-    def plot_sample(self, sample):
-        self.sc.set_color([.5, .5, .5])
+    def plot_sample(self, sample, color=[0, .5, 1]):
+        self.sc.set_color(color)
 
         print('Redrawing...', end='')
         self.update()
@@ -134,8 +135,6 @@ if __name__ == '__main__':
     if last_file is None:
         print(f'{Fore.YELLOW}No samples for gesture {gesture.name}.')
         exit()
-
-    sample = np.load(last_file, allow_pickle=True)['data']
 
     plotter = Plotter()
     plotter.init()

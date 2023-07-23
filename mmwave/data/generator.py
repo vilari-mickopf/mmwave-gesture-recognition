@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 
+import os
 from copy import deepcopy
 
 import numpy as np
-
 import sklearn
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
