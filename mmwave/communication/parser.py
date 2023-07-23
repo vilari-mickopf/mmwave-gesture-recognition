@@ -3,7 +3,6 @@
 import time
 import struct
 import pprint
-from copy import deepcopy
 
 import numpy as np
 import pandas as pd
@@ -34,18 +33,18 @@ class Parser:
             return None
 
         if data.find(self.formats.MAGIC_NUMBER) == 0:
-            # Save return value, and start capturing new frame
-            frame = deepcopy(self.buffer)
+            # Save return value, and start capturing new frame(s)
+            frames = self.buffer
             self.buffer = bytearray(data)
 
             self.sync_time = time.perf_counter()
-            if self.sync is False:
+            if not self.sync:
                 print(f'{Fore.GREEN}Sync received!\n')
                 self.sync = True
                 return None
-            return frame
+            return frames
 
-        elif self.sync is False:
+        elif not self.sync:
             if self.sync_time == -1:
                 self.sync_time = time.perf_counter()
                 print(f'{Fore.YELLOW}Waiting for sync...')
@@ -189,7 +188,7 @@ class Parser:
 
             range_val = obj['range_idx'] * self.formats.range_idx_to_meters
 
-            peak = 10*np.log10(1+obj['peak_value'])
+            peak = 10*np.log10(1 + obj['peak_value'])
             x = self.convert_idx(obj['x_coord'], qformat=qformat)
             y = self.convert_idx(obj['y_coord'], qformat=qformat)
             z = self.convert_idx(obj['z_coord'], qformat=qformat)
