@@ -144,36 +144,139 @@ class Model(ABC):
 
 
 class ConvModel(Model):
-    def create_model(self, start_filters=128, factor=2, factor_step=1,
-                           kernel_size=3, depth=3, units=64, dropout=.5):
+    def get_regularizer(self, value):
+        if value > 0:
+            return tf.keras.regularizers.l2(value)
+        return None
+
+    def get_conv(self, conv_type):
+        if conv_type.lower() == '1d':
+            return layers.Conv1D, layers.MaxPooling1D
+        elif conv_type.lower() == '2d':
+            return layers.Conv2D, layers.MaxPooling2D
+        else:
+            raise('Unsupported conv type.')
+
+    def conv_block(self, conv_type, depth=1, start_filters=128, kernel_size=3,
+                         factor=2, factor_step=1, downsample=2,
+                         downsample_step=1, l2=-1):
+        def model(x):
+            conv_layer, max_pooling_layer = self.get_conv(conv_type)
+
+            for i in range(depth):
+                filters = start_filters * factor**(i//factor_step)
+                x = conv_layer(filters, kernel_size=kernel_size, padding='same',
+                               kernel_regularizer=self.get_regularizer(l2))(x)
+                x = layers.ReLU()(x)
+
+                do_downsample = downsample_step == 1 or (i+1) % downsample_step == 0
+                if downsample > 1 and do_downsample:
+                    x = max_pooling_layer(downsample)(x)
+
+            return x
+        return model
+
+    def res_block(self, conv_type, filters=128, depth=3, kernel_size=3, l2=-1):
+        def model(x):
+            conv_layer, _ = self.get_conv(conv_type)
+
+            for _ in range(depth):
+                strides = filters//x.shape[-1]
+                if filters % x.shape[-1] != 0:
+                    raise ValueError('Filter size error')
+
+                res = x
+                x = conv_layer(filters, kernel_size=kernel_size,
+                               strides=strides, padding='same',
+                               kernel_regularizer=self.get_regularizer(l2))(x)
+                x = layers.BatchNormalization()(x)
+                x = layers.ReLU()(x)
+
+                x = conv_layer(filters, kernel_size=kernel_size, padding='same',
+                               kernel_regularizer=self.get_regularizer(l2))(x)
+                if strides > 1:
+                    res = conv_layer(filters=filters, kernel_size=1, strides=strides,
+                                     kernel_regularizer=self.get_regularizer(l2))(res)
+
+                x = layers.BatchNormalization()(x)
+                x = layers.ReLU()(x)
+                x += res
+
+            return x
+        return model
+
+
+class Conv1DModel(ConvModel):
+    def create_model(self, depth=3, l2=-1, units=-1, dropout=.5, **kwargs):
         input = layers.Input(self.X_shape)
         x = layers.Reshape((self.X_shape[0], -1))(input)
 
-        for i in range(depth):
-            x = layers.Conv1D(start_filters * factor**(i//factor_step),
-                              kernel_size=kernel_size, padding='same')(x)
-            x = layers.ReLU()(x)
-            x = layers.Dropout(dropout)(x)
-            x = layers.MaxPooling1D()(x)
-
+        x = self.conv_block('1d', depth=depth, l2=l2, **kwargs)(x)
         x = layers.Flatten()(x)
 
-        x = layers.Dense(units)(x)
-        x = layers.ReLU()(x)
-        x = layers.Dropout(dropout)(x)
+        if units > 0:
+            x = layers.Dense(units)(x)
+            x = layers.ReLU()(x)
+            if dropout > 0:
+                x = layers.Dropout(dropout)(x)
 
         self.model = tf.keras.Model(input, self.output(x))
 
 
+class Conv2DModel(ConvModel):
+    def create_model(self, depth=3, l2=-1, units=-1, dropout=.5, **kwargs):
+        input = layers.Input(self.X_shape)
+
+        x = self.conv_block('2d', depth=depth, l2=l2, **kwargs)(input)
+        x = layers.Flatten()(x)
+
+        if units > 0:
+            x = layers.Dense(units)(x)
+            x = layers.ReLU()(x)
+            if dropout > 0:
+                x = layers.Dropout(dropout)(x)
+
+        self.model = tf.keras.Model(input, self.output(x))
+
+
+class ResNet1DModel(ConvModel):
+    def create_model(self, blocks=[2, 2, 2, 2], start_filters=128, factor=2, l2=-1):
+        input = layers.Input(self.X_shape)
+        x = layers.Reshape((self.X_shape[0], -1))(input)
+        x = self.conv_block('1d', start_filters=start_filters, kernel_size=5, l2=l2)(x)
+
+        for i, block in enumerate(blocks):
+            x = self.res_block('1d', filters=start_filters * factor**i,
+                               depth=block, l2=l2)(x)
+
+        x = layers.Flatten()(x)
+        self.model = tf.keras.Model(input, self.output(x))
+
+
+class ResNet2DModel(ConvModel):
+    def create_model(self, blocks=[2, 2, 2, 2], start_filters=128, factor=2, l2=-1):
+        input = layers.Input(self.X_shape)
+        x = self.conv_block('2d', start_filters=start_filters,
+                            kernel_size=5, l2=l2)(input)
+
+        for i, block in enumerate(blocks):
+            x = self.res_block('2d', filters=start_filters * factor**i,
+                               depth=block, l2=l2)(x)
+
+        x = layers.Flatten()(x)
+        self.model = tf.keras.Model(input, self.output(x))
+
+
 class LstmModel(Model):
-    def create_model(self, units=128, depth=2, dense_units=64, dropout=.5):
+    def create_model(self, units=256, depth=2, dense_units=-1, dropout=.5):
         input = layers.Input(shape=self.X_shape)
         x = layers.Reshape((self.X_shape[0], -1))(input)
 
-        for i in range(depth):
-            return_sequences = True if i != depth-1 else False
-            x = layers.LSTM(units, return_sequences=return_sequences,
+        for _ in range(depth):
+            x = layers.LSTM(units, return_sequences=True,
                             recurrent_dropout=dropout, dropout=dropout)(x)
+
+        x = layers.Flatten()(x)
 
         if dense_units > 0:
             x = layers.Dense(dense_units)(x)
@@ -186,7 +289,7 @@ class LstmModel(Model):
 class PositionalEncoding(layers.Layer):
     def get_angles(self, pos, i, d_model):
         i, d_model = tf.cast(i, tf.float32), tf.cast(d_model, tf.float32)
-        return pos/tf.pow(10000.0, (2*(i//2))/d_model)
+        return pos/tf.pow(10000., (2*(i//2))/d_model)
 
     def call(self, input):
         batch_size = tf.shape(input)[0]
@@ -197,11 +300,13 @@ class PositionalEncoding(layers.Layer):
         angles = self.get_angles(
             tf.range(num_of_frames, dtype=tf.float32)[:, tf.newaxis],
             tf.range(d_model, dtype=tf.float32)[tf.newaxis, :],
-            d_model
+            d_model*2  # odd d_model fix
         )
 
-        encoding = tf.stack([tf.math.sin(angles[:, 0::2]),
-                             tf.math.cos(angles[:, 1::2])], axis=-1)
+        encoding = tf.concat([tf.math.sin(angles[:, 0::2]),
+                              tf.math.cos(angles[:, 1::2])], axis=1)
+        encoding = encoding[:, :d_model]  # odd d_model fix
+
         encoding = tf.reshape(encoding, shape=(angles.shape[0], -1))
 
         encoding = tf.tile(encoding[tf.newaxis, :, tf.newaxis],
@@ -210,10 +315,52 @@ class PositionalEncoding(layers.Layer):
         return input + encoding
 
 
+class RelativePositionalEncoding(layers.Layer):
+    def __init__(self):
+        super(RelativePositionalEncoding, self).__init__()
+        self.pos_emb = None
+
+    def build(self, input_shape):
+        self.pos_emb = self.add_weight(
+            'pos_emb',
+            shape=[1, input_shape[1], input_shape[2], input_shape[3]],
+            initializer=tf.initializers.RandomNormal(),
+            trainable=True,
+        )
+
+    def call(self, input):
+        if self.pos_emb is None:
+            self.build(input.shape)
+
+        batch_size = tf.shape(input)[0]
+        return input + self.pos_emb*tf.ones([batch_size, 1, 1, 1], dtype=tf.float32)
+
+
+class UnorderedObjectsEncoding(layers.Layer):
+    def __init__(self):
+        super(UnorderedObjectsEncoding, self).__init__()
+        self.obj_emb = None
+
+    def build(self, input_shape):
+        self.obj_emb = self.add_weight(
+            'obj_emb',
+            shape=[input_shape[2], input_shape[3]],
+            initializer=tf.initializers.RandomNormal(),
+            trainable=True
+        )
+
+    def call(self, input):
+        if self.obj_emb is None:
+            self.build(input.shape)
+
+        return input + self.obj_emb
+
+
 class TransModel(Model):
-    def create_model(self, key_dim=128, num_heads=4, depth=1, filters=64, dropout=.5):
+    def create_model(self, key_dim=64, num_heads=8, depth=2, dropout=.5):
         input = layers.Input(shape=self.X_shape)
-        x = PositionalEncoding()(input)
+        x = RelativePositionalEncoding()(input)
+        x = UnorderedObjectsEncoding()(x)
         x = layers.Reshape((self.X_shape[0], -1))(x)
 
         # Attention and Normalization
@@ -224,18 +371,13 @@ class TransModel(Model):
             x += res
             x = layers.LayerNormalization()(x)
 
-        # Feed-forward
-        if filters > 0:
-            res = x
-            x = layers.Conv1D(filters=filters, kernel_size=3, padding='same')(x)
-            x = layers.ReLU()(x)
-
-            x = layers.Conv1D(filters=res.shape[-1], kernel_size=1)(x)
-            x += res
-            x = layers.LayerNormalization()(x)
-
         x = layers.Flatten()(x)
         self.model = tf.keras.Model(input, self.output(x))
+
+    def load(self):
+        custom_objects = {'RelativePositionalEncoding': RelativePositionalEncoding,
+                          'UnorderedObjectsEncoding': UnorderedObjectsEncoding}
+        super().load(custom_objects=custom_objects)
 
 
 if __name__ == '__main__':
