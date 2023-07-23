@@ -5,10 +5,17 @@ import pickle
 from abc import ABC, abstractmethod
 
 import numpy as np
+import matplotlib.pyplot as plt
+
+from sklearn.metrics import accuracy_score, balanced_accuracy_score, f1_score
+from sklearn.metrics import recall_score, confusion_matrix, ConfusionMatrixDisplay
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 import tensorflow as tf
 from tensorflow.keras import layers, callbacks  # type: ignore
+
+from mmwave.data import DataGenerator, GESTURE
+
 
 import colorama
 from colorama import Fore
@@ -42,11 +49,17 @@ class Model(ABC):
     def get_callbacks(self):
         model_callbacks = [
             callbacks.ReduceLROnPlateau(factor=.5, patience=5, verbose=1),
-            callbacks.EarlyStopping(patience=15, restore_best_weights=True)
+            callbacks.EarlyStopping(patience=25, restore_best_weights=True)
         ]
         return model_callbacks
 
-    def train(self, train_paths, y_train, validation_data=None, batch_size=32):
+    def compile(self):
+        self.model.compile(loss='categorical_crossentropy',
+                           optimizer='adam',
+                           metrics=['categorical_accuracy'])
+
+    def train(self, train_paths, y_train, validation_data=None,
+                    sample_size=300, batch_size=32, epochs=500):
         train_data = DataGenerator(train_paths, y_train, batch_size=batch_size,
                                    preprocessor=self.preprocessor,
                                    repeat=True, shuffle=True)
@@ -67,11 +80,8 @@ class Model(ABC):
         tf.keras.utils.plot_model(self.model, show_shapes=True, expand_nested=True,
                                   to_file=os.path.join(self.dir, 'model.png'))
 
-        self.model.compile(loss='categorical_crossentropy',
-                           optimizer='adam',
-                           metrics=['categorical_accuracy'])
-
-        history = self.model.fit(train_data(buffer_size=300), epochs=500,
+        self.compile()
+        history = self.model.fit(train_data(buffer_size=sample_size), epochs=epochs,
                                  steps_per_epoch=len(train_data),
                                  validation_data=validation_data,
                                  validation_steps=validation_steps,
@@ -84,31 +94,47 @@ class Model(ABC):
 
         return history
 
-    def load(self):
+    def load(self, component=None, custom_objects=None):
+        if component is not None:
+            return self.load_component(component)
+
+        self.load_model(custom_objects)
+
+    def load_model(self, custom_objects):
+        tf.keras.backend.clear_session()
         print('Loading model...', end='')
-        self.model = tf.keras.models.load_model(os.path.join(self.dir, 'model.h5'))
+        self.model = tf.keras.models.load_model(os.path.join(self.dir, 'model.h5'),
+                                                custom_objects=custom_objects)
 
-        with open(os.path.join(self.dir, 'preprocessor'), 'rb') as f:
-            self.preprocessor = pickle.load(f)
+        self.load_component('preprocessor')
+        self.load_component('history')
 
-        with open(os.path.join(self.dir, 'history'), 'rb') as f:
-            self.history = pickle.load(f)
-
-        # Initilze model with zero input
+        # Pass zero input to initilze the model
         self.predict(np.zeros(self.model.input_shape[1:]), preprocess=False)
-        print(f'{Fore.GREEN}Done.')
+        print(f'{Fore.GREEN}Done.', flush=True)
+
+    def load_component(self, component):
+        path = os.path.join(self.dir, component)
+        if os.path.exists(path):
+            with open(path, 'rb') as f:
+                setattr(self, component, pickle.load(f))
 
     def save(self):
         print(f'{Fore.YELLOW}Saving model...', end='', flush=True)
         self.model.save(os.path.join(self.dir, 'model.h5'))
 
-        with open(os.path.join(self.dir, 'preprocessor'), 'wb') as f:
-            pickle.dump(self.preprocessor, f)
-
-        with open(os.path.join(self.dir, 'history'), 'wb') as f:
-            pickle.dump(self.history, f)
+        self.save_component('preprocessor')
+        self.save_component('history')
 
         print(f'{Fore.GREEN}Done.')
+
+    def save_component(self, component):
+        value = getattr(self, component)
+        if value is None:
+            return
+
+        with open(os.path.join(self.dir, component), 'wb') as f:
+            pickle.dump(value, f)
 
     def loaded(self):
         return self.model is not None
@@ -122,21 +148,44 @@ class Model(ABC):
         return wrapper
 
     @check_model
-    def evaluate(self, data):
-        if self.preprocessor is not None:
-            data = [self.preprocessor.process(d) for d in data]
+    def evaluate(self, paths, y, show=False, save=False):
+        y_true, y_pred = [], []
+        for Xi, yi in DataGenerator(paths, y).get_data():
+            pred = self.predict(Xi, preprocess=True)
+            y_pred.append(pred)
+            y_true.append(yi)
 
-        preds = self.model.evaluate([self.preprocessor.process(d) for d in data])
-        print(f'Loss: {round(preds[0], 4)}', end=' ')
-        print(f'Acc: {round(preds[1], 4)}')
+        y_true_labels = np.argmax(y_true, axis=1)
+        y_pred_labels = np.argmax(y_pred, axis=1)
+
+        print(f'Accuracy: {accuracy_score(y_true_labels, y_pred_labels)}')
+        print(f'Balanced accuracy:', end=' ')
+        print(balanced_accuracy_score(y_true_labels, y_pred_labels))
+        print(f'f1: {f1_score(y_true_labels, y_pred_labels, average="macro")}')
+        print(f'Recall: {recall_score(y_true_labels, y_pred_labels, average="macro")}')
+
+        if save or show:
+            labels = [GESTURE[i].name for i in np.unique([y_true_labels,
+                                                          y_pred_labels])]
+            cm = confusion_matrix(y_true_labels, y_pred_labels, normalize='true')
+            ConfusionMatrixDisplay(cm, display_labels=labels).plot()
+            plt.title(f'Confusion matrix for {model.__class__.__name__}')
+
+            if show:
+                plt.show()
+
+            if save:
+                plt.savefig(os.path.join(self.dir, 'confusion_matrix.png'))
+
+        return y_true_labels, y_pred
 
     @check_model
-    def predict(self, X, preprocess=True):
+    def predict(self, sample, preprocess=True):
         if preprocess and self.preprocessor is not None:
             for p in self.preprocessor:
-                X = p.process(X)
+                sample = p.process(sample)
 
-        return self._predict(np.array([X]))[0]
+        return self._predict(np.array([sample]))[0]
 
     @tf.function
     def _predict(self, X):
@@ -386,7 +435,9 @@ if __name__ == '__main__':
     from mmwave.data import Logger, Formats, DataGenerator
     from mmwave.data.preprocessor import Polar, ZeroPadd
 
+
     paths, y = Logger.get_paths()
+
     train_paths, test_paths, y_train, y_test = train_test_split(paths, y, stratify=y,
                                                                 test_size=.3,
                                                                 random_state=12)
@@ -398,9 +449,15 @@ if __name__ == '__main__':
 
     config = os.path.join(os.path.dirname(__file__),
                           'communication/profiles/profile.cfg')
-    preprocessor = [Polar(Formats(config)), ZeroPadd()]
 
-    # model = ConvModel(preprocessor=preprocessor)
-    # model = LstmModel(preprocessor=preprocessor)
-    model = TransModel(preprocessor=preprocessor)
-    model.train(train_paths, y_train, validation_data=(val_paths, y_val))
+    preprocessor = [Polar(Formats(config)),
+                    ZeroPadd(num_of_frames=25, num_of_objs=40)]
+
+    for GestureModel in [Conv1DModel, Conv2DModel, LstmModel,
+                         TransModel, ResNet1DModel, ResNet2DModel]:
+        model = GestureModel(preprocessor=preprocessor)
+
+        model.train(train_paths, y_train, validation_data=(val_paths, y_val))
+        model.load()
+        model.evaluate(test_paths, y_test, save=True)
+        del model
