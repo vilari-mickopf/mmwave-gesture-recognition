@@ -8,6 +8,7 @@ from abc import ABC, abstractmethod
 import numpy as np
 
 from mmwave.data import Formats, GESTURE
+from mmwave.data.preprocessor import ZeroPadd
 
 import colorama
 from colorama import Fore
@@ -133,30 +134,34 @@ class PrintThread(Thread):
 
 
 class PredictThread(Thread):
-    def __init__(self, model, logger, timeout=.5):
+    def __init__(self, model, logger, debug=False):
         super().__init__()
         self.model = model
         self.logger = logger
-        self.timeout = timeout
+        self.debug = debug
 
-        self.data = None
-        self.empty_frames = []
-        self.detected_time = time.perf_counter()
-        self.frame_num = 0
+        self.max_frames = None
+        if self.model.preprocessor is not None:
+            for p in self.model.preprocessor:
+                if isinstance(p, ZeroPadd):
+                    self.max_frames = p.num_of_frames
 
     def process(self):
         frame = self.collect()
-        data = self.logger.log(frame, echo=False)
-        if data is None:
-            return
-
-        if sum(1 for frame in data if frame is not None) <= 3:
+        data = self.logger.log(frame, max_frames=self.max_frames, echo=False)
+        if data is None or not self.logger.check_len(data):
             return
 
         pred = self.model.predict(data)
-        if pred[np.argmax(pred)] > .8:
+        gesture = GESTURE[np.argmax(pred)]
+        if pred[np.argmax(pred)] > .9 and gesture != GESTURE.NONE:
             print(f'{Fore.GREEN}Gesture recognized:', end=' ')
-            print(f'{Fore.BLUE}{GESTURE[int(np.argmax(pred))]}')
+            print(f'{Fore.BLUE}{gesture.name}')
+            print(f'{Fore.CYAN}{"="*30}\n')
+
+        if self.debug:
+            for idx in np.argsort(pred)[::-1]:
+                print(f'{Fore.YELLOW}{GESTURE[idx].name}: {pred[idx]*100:.1f}%')
             print(f'{Fore.CYAN}{"="*30}\n')
 
 
@@ -170,7 +175,7 @@ class LogThread(Thread):
         frame = self.collect()
         data = self.logger.log(frame, echo=True)
         if data is not None:
-            self.logger.save(self.gesture, data)
+            self.logger.save(data, self.gesture)
             self.stop()
 
 

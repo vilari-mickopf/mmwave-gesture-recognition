@@ -6,12 +6,10 @@ import platform
 import readline
 import binascii
 import queue
-import serial
-import pickle
-
 from cmd import Cmd
 
-import numpy as np
+import serial
+
 from sklearn.model_selection import train_test_split
 
 from mmwave.communication import Connection, mmWave, Parser
@@ -31,6 +29,15 @@ colorama.init(autoreset=True)
 
 
 class Console(Cmd):
+    models = {
+        'conv1d': Conv1DModel,
+        'conv2d': Conv2DModel,
+        'resnet1d': ResNet1DModel,
+        'resnet2d': ResNet2DModel,
+        'lstm': LstmModel,
+        'trans': TransModel
+    }
+
     def __init__(self, main_queue):
         super().__init__()
 
@@ -56,13 +63,15 @@ class Console(Cmd):
         self.parser = None
 
         # Data logger
+        self.logger = Logger()
         self.data_dir = None
+        self.cached_gesture = None
 
         # Model
         self.model = 'lstm'
 
         # Threading stuff
-        self.main_queue = main_queue
+        self.main_queue = main_queue  # Send func to main thread
         self.plotter_queue = queue.Queue()
         self.plotter = Plotter(self.plotter_queue)
 
@@ -88,14 +97,10 @@ class Console(Cmd):
 
     @model.setter
     def model(self, model):
-        if model == 'conv':
-            self._model = ConvModel()
-        elif model == 'lstm':
-            self._model = LstmModel()
-        elif model == 'trans':
-            self._model = TransModel()
-        else:
+        if model not in self.models:
             raise NotImplemented(model)
+
+        self._model = self.models[model]()
 
     def mmwave_init(self, cli_port, data_port, cli_rate, data_rate):
         self.mmwave = None
@@ -389,7 +394,7 @@ class Console(Cmd):
                 error(f'Rate {rate} is not valid.')
                 warning('Valid baudrates:')
                 for rate in rates:
-                    warning('\t' + rate)
+                    warning(f'\t{rate}')
                 warning('Type \'exit\' to return.')
                 rate = -1
             else:
@@ -508,6 +513,19 @@ class Console(Cmd):
 
         self.model = args
 
+    @argcheck(min=1, max=1)
+    def do_set_data_dir(self, args=''):
+        '''
+        Set data directory used for saving/loading of gesture data.
+        Default dir is 'mmwave/data/'.
+
+        Usage:
+        >> set_data_dir custom_path/datadir_2
+        '''
+
+        os.makedirs(args, exist_ok=True)
+        self.data_dir = args
+
     def complete_set_model(self, text, line, begidx, endidx):
         return self.complete_from_list(['conv', 'lstm', 'trans'], text, line)
 
@@ -538,7 +556,7 @@ class Console(Cmd):
         '''
         if self.config is None:
             warning('mmWave not configured.')
-            return
+            self.do_configure()
 
         if self.check_thread('listen'):
             warning('listen thread already started.')
@@ -660,7 +678,7 @@ class Console(Cmd):
             self.model.load()
             print()
 
-        self.predict_thread = PredictThread(self.model, Logger())
+        self.predict_thread = PredictThread(self.model, Logger(), debug=False)
         self.predict_thread.start()
         self.parse_thread.forward_to(self.predict_thread)
 
@@ -684,22 +702,18 @@ class Console(Cmd):
         self.do_configure()
         self.do_listen()
         self.do_plot()
-        self.model = 'conv'
         self.do_predict()
 
-    @argcheck(max=1)
+    @argcheck()
     def do_train(self, args=''):
         '''
         Train neural network with data
 
         Usage:
         >> train
-        >> train <DATA_PATH>
         '''
 
-        # TODO: ability to set data dir
-
-        paths, y = Logger.get_paths()
+        paths, y = Logger.get_paths(dir=self.data_dir)
         train_paths, test_paths, y_train, y_test = train_test_split(paths, y,
                                                                     stratify=y,
                                                                     test_size=.3,
@@ -710,26 +724,19 @@ class Console(Cmd):
                                                                 test_size=.5,
                                                                 random_state=12)
 
-        preprocessor_path = os.path.join(self.model.dir, 'preprocessor')
-        if os.path.exists(preprocessor_path):
-            with open(preprocessor_path, 'wb') as f:
-                self.model.preprocessor = pickle.load(f)
-
+        self.model.load('preprocessor')
         self.model.train(train_paths, y_train, validation_data=(val_paths, y_val))
 
-    @argcheck(max=1)
+    @argcheck()
     def do_eval(self, args=''):
         '''
         Evaluate neural network
 
         Usage:
         >> eval
-        >> eval <DATA_PATH>
         '''
 
-        # TODO: ability to set data dir
-
-        paths, y = Logger.get_paths()
+        paths, y = Logger.get_paths(dir=self.data_dir)
         if not self.model.loaded():
             self.model.load()
             print()
@@ -737,31 +744,53 @@ class Console(Cmd):
         self.model.evaluate(paths, y)
         print()
 
-    def complete_eval(self, text, line, begidx, endidx):
-        return self.complete_from_list(['refresh'], text, line)
+    def get_gesture(self, name=''):
+        if not name:
+            if self.cached_gesture is None:
+                warning(f'Not enough arguments')
+                return
 
-    @argcheck(min=1, max=1)
+            name = self.cached_gesture
+
+        if name not in GESTURE:
+            warning(f'Unknown argument: {name}')
+            return
+
+        self.cached_gesture = name
+
+        gesture = GESTURE[name]
+        if self.data_dir is not None:
+            gesture.dir = self.data_dir
+
+        return gesture
+
+    @argcheck(max=1)
     @if_thread_running('listen')
     def do_log(self, args=''):
         '''
         Log data
 
         Logging specified gesture. Data will be saved in
-        \'mmwave/data/gesture_foder/sameple_num.csv\' file.
+        \'mmwave/data/<gesture>/sample_<num>.npy\' file.
         Possible options: \'up\', \'down\', \'left\', \'right\', \'cw\',
-                          \'ccw\', \'s\', \'z\', \'x\'
+                          \'ccw\'
 
         Usage:
         >> log up
+        >> log left
         >> log ccw
-        >> log z
         '''
 
-        if not args in GESTURE:
-            warning(f'Unknown argument: {args}')
+        if self.logger.data is not None:
+            error(f'Still logging previous geture.')
             return
 
-        self.log_thread = LogThread(Logger(), GESTURE[args])
+        gesture = self.get_gesture(args)
+        if gesture is None:
+            return
+
+        warning(f'Logging geture: {gesture.name}')
+        self.log_thread = LogThread(self.logger, gesture)
         self.log_thread.start()
         self.parse_thread.forward_to(self.log_thread)
 
@@ -772,7 +801,7 @@ class Console(Cmd):
     def complete_log(self, text, line, begidx, endidx):
         return self.complete_gestures(text, line)
 
-    @argcheck(min=1, max=1)
+    @argcheck(max=1)
     def do_remove(self, args=''):
         '''
         Remove last sample
@@ -780,23 +809,24 @@ class Console(Cmd):
         Removing last gesture sample. Data will be removed from
         \'mmwave/data/gesture_foder\' folder.
         Possible options: \'up\', \'down\', \'left\', \'right\', \'cw\',
-                          \'ccw\', \'s\', \'z\', \'x\'
+                          \'ccw\'
         Usage:
         >> remove up
+        >> remove left
         >> remove ccw
-        >> remove z
         '''
 
-        if not args in GESTURE:
-            error(f'Unknown gesture: {args}')
+        gesture = self.get_gesture(args)
+        if gesture is None:
             return
 
-        Logger().discard_last_sample(args)
+        warning(f'Removing geture: {args}')
+        self.logger.discard_last_sample(gesture)
 
     def complete_remove(self, text, line, begidx, endidx):
         return self.complete_gestures(text, line)
 
-    @argcheck(min=1, max=1)
+    @argcheck(max=1)
     @if_thread_running('plot')
     def do_redraw(self, args=''):
         '''
@@ -812,11 +842,9 @@ class Console(Cmd):
         >> redraw z
         '''
 
-        if args not in GESTURE:
-            error(f'Unknown gesture: {args}')
+        gesture = self.get_gesture(args)
+        if gesture is None:
             return
-
-        gesture = args if isinstance(args, GESTURE) else GESTURE[args]
 
         last_file = gesture.last_file()
         if last_file is None:
