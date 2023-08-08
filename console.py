@@ -6,16 +6,17 @@ import platform
 import readline
 import binascii
 import queue
+import inspect
 from cmd import Cmd
 
 import serial
 
 from sklearn.model_selection import train_test_split
 
+import mmwave.model
 from mmwave.communication import Connection, mmWave, Parser
 from mmwave.data import Formats, GESTURE, Logger, DataLoader
-from mmwave.model import Conv1DModel, Conv2DModel, ResNet1DModel, ResNet2DModel
-from mmwave.model import LstmModel, TransModel
+
 from mmwave.utils import Plotter, print, error, warning
 from mmwave.utils.flasher import Flasher, CMD, OPCODE
 
@@ -29,15 +30,6 @@ colorama.init(autoreset=True)
 
 
 class Console(Cmd):
-    models = {
-        'conv1d': Conv1DModel,
-        'conv2d': Conv2DModel,
-        'resnet1d': ResNet1DModel,
-        'resnet2d': ResNet2DModel,
-        'lstm': LstmModel,
-        'trans': TransModel
-    }
-
     def __init__(self, main_queue):
         super().__init__()
 
@@ -68,6 +60,7 @@ class Console(Cmd):
         self.cached_gesture = None
 
         # Model
+        self.models = self.get_subclasses(mmwave.model.Model)
         self.model = 'lstm'
 
         # Threading stuff
@@ -101,6 +94,13 @@ class Console(Cmd):
             raise NotImplemented(model)
 
         self._model = self.models[model]()
+
+    def get_subclasses(self, base):
+        subclasses = {}
+        for name, obj in inspect.getmembers(mmwave.model):
+            if inspect.isclass(obj) and issubclass(obj, base) and obj is not base:
+                subclasses[name.lower().replace('model', '')] = obj
+        return subclasses
 
     def mmwave_init(self, cli_port, data_port, cli_rate, data_rate):
         self.mmwave = None
@@ -513,6 +513,9 @@ class Console(Cmd):
 
         self.model = args
 
+    def complete_set_model(self, text, line, begidx, endidx):
+        return self.complete_from_list(self.models.keys(), text, line)
+
     @argcheck(min=1, max=1)
     def do_set_data_dir(self, args=''):
         '''
@@ -525,9 +528,6 @@ class Console(Cmd):
 
         os.makedirs(args, exist_ok=True)
         self.data_dir = args
-
-    def complete_set_model(self, text, line, begidx, endidx):
-        return self.complete_from_list(['conv', 'lstm', 'trans'], text, line)
 
     @argcheck()
     def do_get_model(self, args=''):

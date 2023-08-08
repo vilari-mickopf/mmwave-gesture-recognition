@@ -119,7 +119,7 @@ class Logger:
     @staticmethod
     def get_paths(gesture=None, dir=None):
         if gesture is not None:
-            return Logger._get_paths(gesture, dir)
+            return Logger._get_paths(Logger.get_gesture(gesture, dir))
 
         # Get all gestures instead
         paths, y = [], []

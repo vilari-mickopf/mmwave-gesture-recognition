@@ -22,5 +22,6 @@ setup(name='mmwave',
                         'numpy',
                         'multimethod',
                         'matplotlib',
+                        'seaborn',
                         'scikit-learn',
                         'tensorflow'])

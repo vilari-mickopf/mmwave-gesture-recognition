@@ -51,13 +51,13 @@ class Polar(Preprocessor):
         rho = np.sqrt(x**2 + y**2)
         theta = np.arctan2(y, x)
         if rho <= self.max_distance:
+            # -max_velocity : max_velocity -> 0 : 2*max_velocity
             doppler = self.formats.max_velocity + obj['doppler']
-            doppler /= 2*self.formats.max_velocity
 
             return {
                 'rho': rho/self.max_distance,
                 'theta': theta/np.pi,
-                'doppler': doppler,
+                'doppler': doppler/2*self.formats.max_velocity,
                 'peak': obj['peak']/(10*np.log10(1 + 2**16))
             }
 
