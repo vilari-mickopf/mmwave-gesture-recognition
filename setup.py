@@ -3,7 +3,7 @@
 from setuptools import setup, find_packages
 
 
-setup(name='mmwave',
+setup(name='mmwave_gesture',
       version='0.2',
       description='mmWave gesture recognition',
       url='http://github.com/f12markovic/mmwave-gesture-recognition',

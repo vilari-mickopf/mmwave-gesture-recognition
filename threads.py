@@ -7,8 +7,8 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 
-from mmwave.data import Formats, GESTURE
-from mmwave.data.preprocessor import ZeroPadd
+from mmwave_gesture.data import Formats, GESTURE
+from mmwave_gesture.data.preprocessor import ZeroPadd
 
 import colorama
 from colorama import Fore

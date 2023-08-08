@@ -13,12 +13,12 @@ import serial
 
 from sklearn.model_selection import train_test_split
 
-import mmwave.model
-from mmwave.communication import Connection, mmWave, Parser
-from mmwave.data import Formats, GESTURE, Logger, DataLoader
+import mmwave_gesture.model
+from mmwave_gesture.communication import Connection, mmWave, Parser
+from mmwave_gesture.data import Formats, GESTURE, Logger, DataLoader
 
-from mmwave.utils import Plotter, print, error, warning
-from mmwave.utils.flasher import Flasher, CMD, OPCODE
+from mmwave_gesture.utils import Plotter, print, error, warning
+from mmwave_gesture.utils.flasher import Flasher, CMD, OPCODE
 
 from handlers import SignalHandler, Completer
 from threads import threaded, ListenThread, ParseThread, PrintThread
@@ -49,7 +49,7 @@ class Console(Cmd):
 
         # Configuration
         self.config_dir = os.path.join(os.path.dirname(__file__),
-                                       'mmwave/communication/profiles')
+                                       'mmwave_gesture/communication/profiles')
         self.default_config = 'profile'
         self.config = None
         self.parser = None
@@ -60,8 +60,8 @@ class Console(Cmd):
         self.cached_gesture = None
 
         # Model
-        self.models = self.get_subclasses(mmwave.model.Model)
-        self.model = 'lstm'
+        self.models = self.get_subclasses(mmwave_gesture.model.Model)
+        self.model = 'conv1d'
 
         # Threading stuff
         self.main_queue = main_queue  # Send func to main thread
@@ -97,7 +97,7 @@ class Console(Cmd):
 
     def get_subclasses(self, base):
         subclasses = {}
-        for name, obj in inspect.getmembers(mmwave.model):
+        for name, obj in inspect.getmembers(mmwave_gesture.model):
             if inspect.isclass(obj) and issubclass(obj, base) and obj is not base:
                 subclasses[name.lower().replace('model', '')] = obj
         return subclasses
@@ -557,6 +557,9 @@ class Console(Cmd):
         if self.config is None:
             warning('mmWave not configured.')
             self.do_configure()
+
+        if self.config is None:
+            return
 
         if self.check_thread('listen'):
             warning('listen thread already started.')

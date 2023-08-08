@@ -6,7 +6,7 @@ import readline
 
 from signal import signal, SIGINT
 
-from mmwave.utils.prints import warning
+from mmwave_gesture.utils.prints import warning
 
 
 class SignalHandler:
