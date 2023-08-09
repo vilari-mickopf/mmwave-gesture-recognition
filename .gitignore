@@ -1,4 +1,6 @@
 .*project
+.*Model
+*.npz
 __pycache__/
-mmwave.egg-info/
+mmwave_gesture.egg-info/
 tags

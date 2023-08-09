@@ -1,0 +1,11 @@
+#!/bin/sh
+
+download_and_extract() {
+    curl -L "$1" -o /dev/shm/temp.zip && unzip -o /dev/shm/temp.zip -d "$2" && rm /dev/shm/temp.zip
+}
+
+DATA_URL='https://www.dropbox.com/scl/fi/ficpwdbg834jqr0tnx1dk/data.zip?rlkey=9uohqy9bcztpyvo8yydt8tglp&dl=0'
+MODELS_URL='https://www.dropbox.com/scl/fi/ficpwdbg834jqr0tnx1dk/data.zip?rlkey=9uohqy9bcztpyvo8yydt8tglp&dl=0'
+
+download_and_extract $DATA_URL mmwave_gesture/data
+# download_and_extract $MODELS_URL mmwave_gesture

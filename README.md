@@ -1,36 +1,35 @@
 # Basic Gesture Recognition Using mmWave Sensor - TI AWR1642
 
-Collecting data from TI AWR1642 via serial port and passing it through convolutional,lstm or transformer neural network for recognizing one of nine following gestures:
-
+Collecting data from TI AWR1642 via serial port and passing it through convolutional, resnet, lstm or transformer neural network for recognizing one of following gestures:
+- None (random non gestrures)
 - Swipe Up
 - Swipe Down
 - Swipe Right
 - Swipe Left
 - Spin CW
 - Spin CCW
-- Letter Z
-- Letter X
-- Letter S
 
 ![Demo](./demo.gif)
 
 # Getting Started
 
 ## Deps:
-python 3.8+
+- python 3.8+
+- unzip (optional)
+- curl (optional)
+
+unzip and curl are used in `get-data` script, you can download [data]() and [models]() manually and put unzip contented them to [mmwave_gesture/data](./mmwave_gesture/data) and [mmwave_gesture](./mmwave_gesture) respectively.
 
 ## Installation
 
-Install [mmwave](./mmwave/) package locally:
+Install [mmwave_gesture](./mmwave_gesture/) package locally:
 
 ```bash
 git clone https://gitlab.com/vilari-mickopf/mmwave-gesture-recognition.git
 cd mmwave-gesture-recognition
-git lfs pull
-pip3 install -e ./
+pip install -e .
+./get-data
 ```
-
-_Note: trans\_model is saved on lfs, because it has 200+mb, but github bandiwth is way too small so the file is now blocked. And additionally, the bandwith is not resetting after a month as supposed to, so I would advise just pulling it from [gitlab](https://gitlab.com/vilari-mickopf/mmwave-gesture-recognition) instead (without trans model, you can still use lstm or conv models)._
 
 ## Serial permissions
 
@@ -110,8 +109,6 @@ python console.py
 
 ### Training
 
-Console can be used for the training process. [X](./mmwave/data/.X_data) and [y](./mmwave/data/.y_data) data is cached in pickle files located in [mmwave/data/](./mmwave/data/) directory. If new data is captured, _refresh_ argument should be passed (this option will take few minutes to execute).
-
 ```bash
 python console.py
 >> train
@@ -120,19 +117,18 @@ python console.py
 or
 
 ```bash
-python console.py
->> train refresh
+python mmwave_gesture/model.py
+>> train
 ```
 
 ### Selecting model
 By default, lstm model is used. Other models can be selected using _set_model_ option.
 ```bash
 python console.py
->> set_model conv
+>> set_model conv1d
 >> set_model lstm
 >> set_model trans
 ```
-[Known issue](https://github.com/tensorflow/tensorflow/issues/40171): Tensorflow 2 introduced memory leak on repeatedly loading/unloading of the models, which can cause crashes due to not having enough memory to initialize new model.
 
 ### Help
 
