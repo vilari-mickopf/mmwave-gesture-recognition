@@ -122,7 +122,7 @@ chmod 666 /dev/ttyACM*
 
 ## Flashing
 
-The code used for AWR1642 is just a variation of mmWaveSDK demo provided with
+The firmware code used for AWR1642 is just a mmWaveSDK demo provided with
 the version 02.00.00.04. Bin file is located in [firmware](./firmware/) directory.
 
 1. Close SOP0 and SOP2, and reset the power.
