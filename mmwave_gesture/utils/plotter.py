@@ -97,7 +97,6 @@ class Plotter:
     def plot_sample(self, sample, color=[0, .5, 1]):
         self.sc.set_color(color)
 
-        print('Redrawing...', end='')
         self.update()
         for frame in sample:
             objs = None if frame is None else [[obj['x'], obj['y']] for obj in frame]
@@ -106,7 +105,6 @@ class Plotter:
 
         self.update()
         self.sc.set_color([1, 0, 0])
-        print('Done.\n')
 
     def plot_detected_objs(self, frame):
         points = None

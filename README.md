@@ -1,15 +1,20 @@
 # Basic Gesture Recognition Using mmWave Sensor - TI AWR1642
 
-Collecting data from TI AWR1642 via serial port and passing it through convolutional, resnet, lstm or transformer neural network for recognizing one of following gestures:
-- None (random non gestrures)
+Collecting data from the TI AWR1642 via its serial port, this setup allows the user to choose one of several neural network architectures - convolutional, ResNet, LSTM, or Transformer.
+The selected network is then used for the recognition and classification of specific gestures:
+- None (random non-gestures)
 - Swipe Up
 - Swipe Down
 - Swipe Right
 - Swipe Left
-- Spin CW
-- Spin CCW
+- Spin Clockwise
+- Spin Counterclockwise
+- Letter Z
+- Letter S
+- Letter X
 
-![Demo](./demo.gif)
+[![Demo](https://i.imgur.com/QJKJhld.png)](https://drive.google.com/file/d/1CCb8JBcAVc_qRKH24a_IKks0S9raUnme/view?usp=sharing)
+
 
 # Getting Started
 
@@ -18,7 +23,8 @@ Collecting data from TI AWR1642 via serial port and passing it through convoluti
 - unzip (optional)
 - curl (optional)
 
-unzip and curl are used in `get-data` script, you can download [data]() and [models]() manually and put unzip contented them to [mmwave_gesture/data](./mmwave_gesture/data) and [mmwave_gesture](./mmwave_gesture) respectively.
+_unzip and curl are used by the [fetch](./fetch) script._
+
 
 ## Installation
 
@@ -28,12 +34,65 @@ Install [mmwave_gesture](./mmwave_gesture/) package locally:
 git clone https://gitlab.com/vilari-mickopf/mmwave-gesture-recognition.git
 cd mmwave-gesture-recognition
 pip install -e .
-./get-data
+```
+
+### Data and models
+You can run [./fetch](./fetch) script to download and extract:
+
+- [data](https://www.dropbox.com/scl/fi/y431rn0eauy2qkiz0y0g2/data.zip?rlkey=punhs9iquojldn6ug2owgnkbv&dl=0) (20k samples - 2k per class) ~120Mb
+
+- [models](https://www.dropbox.com/scl/fi/ni8ioomcqzjvocfj9gx1j/models.zip?rlkey=pf0g7tpi20zn3idowptw9y9fe&dl=0) (Conv1D, Conv2D, ResNet1D, ResNet2D, LSTM and Transformer models) ~320Mb
+
+To access the required data manually, follow the provided links to download the files.
+Once downloaded, manually extract the contents to the directories [mmwave_gesture/data/](mmwave_gesture/data/) and [mmwave_gesture/models/](mmwave_gesture/models/) as appropriate.
+
+End result should look like this:
+```
+mmwave_gesture/
+│ communication/
+│ data/
+│ │ ccw/
+│ │ cw/
+│ │ down/
+│ │ │ sample_1.npz
+│ │ │ sample_2.npz
+│ │ │ ...
+│ │ └ sample_2000.npz
+│ │ left/
+│ │ none/
+│ │ right/
+│ │ s/
+│ │ up/
+│ │ x/
+│ │ z/
+│ │ __init__.py
+│ │ formats.py
+│ │ generator.py
+│ │ loader.py
+│ │ logger.py
+│ └ preprocessor.py
+│ models/
+│ │ Conv1DModel/
+│ │ │ confusion_matrix.png
+│ │ │ history
+│ │ │ model.h5
+│ │ │ model.png
+│ │ └ preprocessor
+│ │ Conv2DModel/
+│ │ LstmModel/
+│ │ ResNet1DModel/
+│ │ ResNet2DModel/
+│ └ TransModel/
+│ utils/
+│ __init__.py
+│ model.py
+...
 ```
 
 ## Serial permissions
 
 The group name can differ from distribution to distribution.
+
 
 ### Arch
 
@@ -69,7 +128,7 @@ the version 02.00.00.04. Bin file is located in [firmware](./firmware/) director
 1. Close SOP0 and SOP2, and reset the power.
 2. Start the console and run flash command:
 ```bash
-python console.py
+python mmwave-console.py
 >> flash xwr16xx_mmw_demo.bin
 ```
 3. Remove SOP0 and reset the power again.
@@ -81,11 +140,12 @@ If the board was connected before starting the console, the script should automa
 
 If the board is connected, the prompt will be green, otherwise, it will be red.
 
-After connecting, simple _start_ command will start listener, parser, plotter and prediction.
+After connecting run plotter and prediction with following commands:
 
 ```bash
-python console.py
->> start
+python mmwave-console.py
+>> plot
+>> predict
 ```
 
 Use _Ctrl-C_ to stop this command.
@@ -93,12 +153,13 @@ Use _Ctrl-C_ to stop this command.
 
 ### Collecting data
 
-The console can be used for easy data collection. Use _log_ command to save gesture samples in .csv files in [mmwave/data/](./mmwave/data/) directory. If nothing is captured for more than a half a second, the command will automatically stop. _redraw_/_remove_ commands will redraw/remove the last captured sample.
+The console can be used for easy data collection. Use _log_ command to save gesture samples in .npz format in [mmwave/data/](./mmwave/data/) directory (or custom directory specified by `set_data_dir` command). If nothing is captured for more than a half a second, the command will automatically be stopped. _redraw_/_remove_ commands will redraw/remove the last captured sample.
 
 ```bash
-python console.py
+python mmwave-console.py
 >> listen
 >> plot
+>> set_data_dir /path/to/custom/data/dir
 >> log up
 >> log up
 >> redraw up
@@ -110,7 +171,8 @@ python console.py
 ### Training
 
 ```bash
-python console.py
+python mmwave-console.py
+>> set_data_dir /path/to/custom/data/dir
 >> train
 ```
 
@@ -118,13 +180,14 @@ or
 
 ```bash
 python mmwave_gesture/model.py
->> train
 ```
 
+_Note: Default data dir is [mmwave_gesture/data](mmwave_gesture/data).
+
 ### Selecting model
-By default, lstm model is used. Other models can be selected using _set_model_ option.
+By default, conv2d model is used. Other models can be selected using _set_model_ option.
 ```bash
-python console.py
+python mmwave-console.py
 >> set_model conv1d
 >> set_model lstm
 >> set_model trans
@@ -135,7 +198,7 @@ python console.py
 Use help command to list all available commands and get documentation on them.
 
 ```bash
-python console.py
+python mmwave-console.py
 >> help
 >> help flash
 >> help listen

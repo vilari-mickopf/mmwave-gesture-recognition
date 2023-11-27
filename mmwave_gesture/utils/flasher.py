@@ -6,7 +6,7 @@ import struct
 
 from tqdm import tqdm
 
-from mmwave_gesture.utils.prints import error
+from mmwave_gesture.utils.thread_safe_print import error
 
 import colorama
 from colorama import Fore

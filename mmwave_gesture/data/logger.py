@@ -1,13 +1,14 @@
 #!/usr/bin/env python
 
 import os
-import glob
+import re
 import time
 
 import numpy as np
+from sklearn.model_selection import train_test_split
 
 from mmwave_gesture.data import GESTURE, DataLoader
-from mmwave_gesture.utils.prints import print, warning
+from mmwave_gesture.utils.thread_safe_print import print, warning
 
 import colorama
 from colorama import Fore
@@ -34,7 +35,7 @@ class Logger:
             self.timeout = self.start_timeout
             self.empty_frames_cnt = 0
             if echo:
-                print('Saving sample...')
+                print('Saving sample...', end='')
 
         if time.perf_counter() - self.detected_time > self.timeout:
             data = self.data
@@ -76,7 +77,7 @@ class Logger:
 
     def save(self, data, gesture):
         if not data:
-            warning('Nothing to save.\n')
+            warning('Nothing to save.')
             return
 
         if not self.check_len(data):
@@ -87,7 +88,7 @@ class Logger:
             os.makedirs(gesture.dir)
 
         np.savez_compressed(gesture.next_file(), data=np.array(data, dtype=object))
-        print(f'{Fore.GREEN}Sample saved.\n')
+        print(f'{Fore.GREEN}Done.')
 
     def discard_last_sample(self, gesture):
         last_sample = self.get_gesture(gesture, self.data_dir).last_file()
@@ -110,9 +111,12 @@ class Logger:
         if not os.path.exists(gesture.dir):
             return paths, y
 
-        for f in glob.glob(f'{gesture.dir}/**/*.npz', recursive=True):
-            paths.append(f)
-            y.append(gesture.value)
+        extensions = DataLoader.get_extensions()
+        for root, _, files in os.walk(gesture.dir):
+            for f in files:
+                if re.match(fr'.*\.({"|".join(extensions)})$', f):
+                    paths.append(os.path.join(root, f))
+                    y.append(gesture.value)
 
         return paths, y
 
@@ -132,3 +136,16 @@ class Logger:
             y.extend(labels)
 
         return paths, y
+
+    @staticmethod
+    def split(paths, y, test_size=1/3):
+        train_paths, test_paths, y_train, y_test = train_test_split(paths, y, stratify=y,
+                                                                    test_size=test_size,
+                                                                    random_state=12)
+
+        val_paths, test_paths, y_val, y_test = train_test_split(test_paths, y_test,
+                                                                stratify=y_test,
+                                                                test_size=.5,
+                                                                random_state=12)
+
+        return (train_paths, y_train), (val_paths, y_val), (test_paths, y_test)

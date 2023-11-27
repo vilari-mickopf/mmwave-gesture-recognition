@@ -2,6 +2,7 @@
 
 import re
 import time
+import termios
 
 import serial
 import serial.tools.list_ports
@@ -76,6 +77,9 @@ class Connection:
                       f'{Fore.RED}Check your connection and permissions')
                 self.print_available_ports()
                 self.port = None
+            except termios.error:
+                pass
+
         return wrapper
 
     @connection_error_handler
@@ -217,6 +221,7 @@ class mmWave:
 
             # Parse response
             response = self.get_cmd()
+            response = response.replace('mmwDemo:/>', '')
             if 'Done' in response:
                 print(f'Received: {Fore.GREEN}{response}')
             elif 'Ignored' in response or 'Debug:' in response:
@@ -271,10 +276,19 @@ class mmWave:
         return self.cli_port.write(cmd.encode())
 
     def get_cmd(self):
-        response = self.cli_port.readline()
-        if response is not None:
-            response = response.decode(errors='ignore')
-        return response
+        # Read the first byte
+        first_byte = self.cli_port.read(1)
+
+        # If the first byte is received, set the timeout to 0.05 seconds
+        if first_byte:
+            self.cli_port.port.timeout = 0.05
+
+        response = first_byte + b''.join(iter(lambda: self.cli_port.read(1), b''))
+        if not response:
+            return None
+
+        self.cli_port.port.timeout = self.cli_port.TIMEOUT
+        return response.decode(errors='ignore')
 
     def get_data(self, size=None):
         return self.data_port.read(size=size)

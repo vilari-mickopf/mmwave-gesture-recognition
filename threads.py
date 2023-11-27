@@ -8,7 +8,7 @@ from abc import ABC, abstractmethod
 import numpy as np
 
 from mmwave_gesture.data import Formats, GESTURE
-from mmwave_gesture.data.preprocessor import ZeroPadd
+from mmwave_gesture.data.preprocessor import ConsistentShape
 
 import colorama
 from colorama import Fore
@@ -100,14 +100,20 @@ class ListenThread(Thread):
 
 
 class ParseThread(Thread):
-    def __init__(self, parser, convert_objs=True):
+    def __init__(self, parser, prompt, convert_objs=True):
         super().__init__()
         self.parser = parser
+        self.prompt = prompt
         self.convert_objs = convert_objs
+        self.sync = False
 
     def process(self):
         data = self.collect()
         frames = self.parser.assemble(data)
+        if self.sync != self.parser.sync:
+            print(self.prompt, end='')
+            self.sync = self.parser.sync
+
         if frames is None:
             return
 
@@ -143,7 +149,7 @@ class PredictThread(Thread):
         self.max_frames = None
         if self.model.preprocessor is not None:
             for p in self.model.preprocessor:
-                if isinstance(p, ZeroPadd):
+                if isinstance(p, ConsistentShape):
                     self.max_frames = p.num_of_frames
 
     def process(self):
@@ -153,15 +159,19 @@ class PredictThread(Thread):
             return
 
         pred = self.model.predict(data)
+        if pred is None:
+            if self.debug:
+                print(f'{Fore.YELLOW}All points are outside of range')
+            return
+
         gesture = GESTURE[np.argmax(pred)]
-        if pred[np.argmax(pred)] > .9 and gesture != GESTURE.NONE:
-            print(f'{Fore.GREEN}Gesture recognized:', end=' ')
-            print(f'{Fore.BLUE}{gesture.name}')
+        if gesture != GESTURE.NONE:
+            print(f'{Fore.GREEN}Gesture recognized: {Fore.BLUE}{gesture.name}')
             print(f'{Fore.CYAN}{"="*30}\n')
 
         if self.debug:
             for idx in np.argsort(pred)[::-1]:
-                print(f'{Fore.YELLOW}{GESTURE[idx].name}: {pred[idx]*100:.1f}%')
+                print(f'{Fore.YELLOW}{GESTURE[idx].name}: {pred[idx]*100:.2f}%')
             print(f'{Fore.CYAN}{"="*30}\n')
 
 

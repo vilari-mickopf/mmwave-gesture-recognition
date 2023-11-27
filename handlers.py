@@ -6,7 +6,7 @@ import readline
 
 from signal import signal, SIGINT
 
-from mmwave_gesture.utils.prints import warning
+from mmwave_gesture.utils import warning
 
 
 class SignalHandler:
@@ -47,11 +47,11 @@ class SignalHandler:
 
 
 class Completer(object):
-    def __init__(self, list):
+    def __init__(self, complete_list):
         def list_completer(text, state):
             line = readline.get_line_buffer()
             if not line:
-                return [f'{c} ' for c in list][state]
+                return [f'{c} ' for c in complete_list][state]
             else:
-                return [f'{c} ' for c in list if c.startswith(line)][state]
+                return [f'{c} ' for c in complete_list if c.startswith(line)][state]
         self.list_completer = list_completer

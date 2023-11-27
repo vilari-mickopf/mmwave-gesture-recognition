@@ -348,9 +348,9 @@ class GESTURE(Enum, metaclass=GESTURE_META):
     RIGHT = auto()
     CW = auto()
     CCW = auto()
-    # Z = auto()
-    # S = auto()
-    # X = auto()
+    Z = auto()
+    S = auto()
+    X = auto()
 
     @property
     def dir(self):

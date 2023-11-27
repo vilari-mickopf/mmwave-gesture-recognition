@@ -1,24 +1,23 @@
 #!/usr/bin/env python
 
-import glob
 import os
+import glob
 import platform
 import readline
 import binascii
 import queue
-import inspect
+import functools
 from cmd import Cmd
 
 import serial
 
-from sklearn.model_selection import train_test_split
+from mmwave_gesture.utils import Plotter
+from mmwave_gesture.utils.thread_safe_print import print, error, warning
+from mmwave_gesture.utils.flasher import Flasher, CMD, OPCODE
 
-import mmwave_gesture.model
+from mmwave_gesture.model import train_evaluate_model, get_model_types
 from mmwave_gesture.communication import Connection, mmWave, Parser
 from mmwave_gesture.data import Formats, GESTURE, Logger, DataLoader
-
-from mmwave_gesture.utils import Plotter, print, error, warning
-from mmwave_gesture.utils.flasher import Flasher, CMD, OPCODE
 
 from handlers import SignalHandler, Completer
 from threads import threaded, ListenThread, ParseThread, PrintThread
@@ -33,10 +32,6 @@ class Console(Cmd):
     def __init__(self, main_queue):
         super().__init__()
 
-        # Flash
-        self.firmware_dir = os.path.join(os.path.dirname(__file__), 'firmware')
-        self.flasher = None
-
         # Connection
         self.default_cli_rate = 115200
         self.default_data_rate = 921600
@@ -47,6 +42,8 @@ class Console(Cmd):
         if self.mmwave is None or not self.mmwave.connected():
             print('Try connecting manually. Type \'help connect\' for more info.\n')
 
+        self.firmware_dir = os.path.join(os.path.dirname(__file__), 'firmware')
+
         # Configuration
         self.config_dir = os.path.join(os.path.dirname(__file__),
                                        'mmwave_gesture/communication/profiles')
@@ -55,13 +52,14 @@ class Console(Cmd):
         self.parser = None
 
         # Data logger
+        self.loader = DataLoader()
         self.logger = Logger()
         self.data_dir = None
         self.cached_gesture = None
 
         # Model
-        self.models = self.get_subclasses(mmwave_gesture.model.Model)
-        self.model = 'conv1d'
+        self.models = get_model_types()
+        self.model = 'conv2d'
 
         # Threading stuff
         self.main_queue = main_queue  # Send func to main thread
@@ -75,7 +73,7 @@ class Console(Cmd):
         self.log_thread = None
         self.predict_thread = None
 
-        # Catching signals (ctrl-c)
+        # Catching <Ctrl>-C signals
         self.console_queue = queue.Queue()
         SignalHandler(self.console_queue)
 
@@ -94,13 +92,6 @@ class Console(Cmd):
             raise NotImplemented(model)
 
         self._model = self.models[model]()
-
-    def get_subclasses(self, base):
-        subclasses = {}
-        for name, obj in inspect.getmembers(mmwave_gesture.model):
-            if inspect.isclass(obj) and issubclass(obj, base) and obj is not base:
-                subclasses[name.lower().replace('model', '')] = obj
-        return subclasses
 
     def mmwave_init(self, cli_port, data_port, cli_rate, data_rate):
         self.mmwave = None
@@ -128,8 +119,6 @@ class Console(Cmd):
                              cli_rate=cli_rate,
                              data_rate=data_rate)
         self.mmwave.connect()
-        if self.mmwave.connected():
-            self.flasher = Flasher(self.mmwave.cli_port)
 
     def connected(self):
         return self.mmwave is not None and self.mmwave.connected()
@@ -140,22 +129,12 @@ class Console(Cmd):
             self.prompt = f'{Fore.GREEN}>>{Fore.RESET} '
 
     def preloop(self):
-        '''
-        Initialization before prompting user for commands.
-        Despite the claims in the Cmd documentation, Cmd.preloop() is not a
-        stub.
-        '''
         Cmd.preloop(self)   # sets up command completion
         self._hist = []      # No history yet
         self._locals = {}      # Initialize execution namespace for user
         self._globals = {}
 
     def postloop(self):
-        '''
-        Take care of any unfinished business.
-        Despite the claims in the Cmd documentation, Cmd.postloop() is not a
-        stub.
-        '''
         Cmd.postloop(self)   # Clean up command completion
         print('Exiting...')
 
@@ -163,15 +142,20 @@ class Console(Cmd):
         thread = getattr(self, f'{name}_thread')
         return thread is not None and thread.is_alive()
 
-    def if_thread_running(name):
-        def arg_wrapper(func):
-            def func_wrapper(self, *args, **kwargs):
+    def ensure_thread_running(name):
+        def decorator(func):
+            def wrapper(self, *args, **kwargs):
                 if not self.check_thread(name):
-                    error(f'{name} thread not started.')
-                    return
+                    warning(f'{name} thread not started. Spawing {name}.')
+                    thread = getattr(self, f'do_{name}', None)
+                    if callable(thread):
+                        thread()
+                    else:
+                        error(f'{name} thread doesn\'t exist. Skipping.')
+                        return
                 return func(self, *args, **kwargs)
-            return func_wrapper
-        return arg_wrapper
+            return wrapper
+        return decorator
 
     def update_plotter(self):
         try:
@@ -185,33 +169,25 @@ class Console(Cmd):
                 self.plot_thread.stop()
 
     def precmd(self, line):
-        '''
-        This method is called after the line has been input but before
-        it has been interpreted. If you want to modify the input line
-        before execution (for example, variable substitution) do it here.
-        '''
         self._hist += [line.strip()]
         self.update_plotter()
+        if not self.connected() and self.check_thread('listen'):
+            self.do_stop('listen')
 
         return line
 
     def postcmd(self, stop, line):
-        '''
-        If you want to stop the console, return something that evaluates to
-        true. If you want to do some post command processing, do it here.
-        '''
         self.set_prompt()
+        self.update_plotter()
+        if not self.connected() and self.check_thread('listen'):
+            self.do_stop('listen')
+
         return stop
 
     def emptyline(self):
-        '''Do nothing on empty input line'''
         pass
 
     def default(self, line):
-        '''
-        Called on an input line when the command prefix is not recognized.
-        In that case we execute the line as Python code.
-        '''
         try:
             exec(line) in self._locals, self._globals
         except Exception:
@@ -248,6 +224,7 @@ class Console(Cmd):
 
     def argcheck(min=0, max=0):
         def arg_wrapper(func):
+            @functools.wraps(func)
             def func_wrapper(self, *args, **kwargs):
                 assert min <= max
 
@@ -295,6 +272,7 @@ class Console(Cmd):
         '''
 
         filepaths = []
+        flasher = Flasher(self.mmwave.cli_port)
         for arg in args.split():
             filepath = os.path.join(self.firmware_dir, arg)
             if not os.path.isfile(filepath):
@@ -303,13 +281,13 @@ class Console(Cmd):
             filepaths.append(filepath)
 
         print('Ping mmWave...', end='')
-        if not self.flasher.send_cmd(CMD(OPCODE.PING), resp=False):
+        if not flasher.send_cmd(CMD(OPCODE.PING), resp=False):
             warning('Check if SOP0 and SOP2 are closed, and reset the power.')
             return
         print(f'{Fore.GREEN}Done.')
 
         print('Get version...', end='')
-        version = self.flasher.send_cmd(CMD(OPCODE.GET_VERSION))
+        version = flasher.send_cmd(CMD(OPCODE.GET_VERSION))
         if version is None:
             error('Can\'t get version info. Aborting.')
             return
@@ -318,7 +296,7 @@ class Console(Cmd):
         print(f'{Fore.BLUE}Version:', binascii.hexlify(version))
         print()
 
-        self.flasher.flash(filepaths, erase=True)
+        flasher.flash(filepaths, erase=True)
         print(f'{Fore.GREEN}Done.')
 
     def complete_flash(self, text, line, begidx, endidx):
@@ -497,17 +475,22 @@ class Console(Cmd):
     @argcheck(min=1, max=1)
     def do_set_model(self, args=''):
         '''
-        Set model type used for prediction. Available models are
-        \'conv\' (convolutional 1D), \'lstm\' (long short-term memory) and
-        \'trans\' (transformer). Default is lstm.
+        Set model type used for prediction. Available models are:
+        - \'conv1d\' (convolutional 1D)
+        - \'conv2d\' (convolutional 2D)
+        - \'res1d\' (residual 1D)
+        - \'res2d\' (residual 2D)
+        - \'lstm\' (long short-term memory)
+        - \'trans\' (transformer)
+        Default is lstm.
 
         Usage:
-        >> set_model conv
+        >> set_model conv1d
         >> set_model lstm
         >> set_model trans
         '''
 
-        if args not in ['conv', 'lstm', 'trans']:
+        if args not in self.models:
             warning(f'Unknown argument: {args}')
             return
 
@@ -567,7 +550,7 @@ class Console(Cmd):
 
         print(f'{Fore.CYAN}=== Listening ===')
         self.listen_thread = ListenThread(self.mmwave)
-        self.parse_thread = ParseThread(self.parser)
+        self.parse_thread = ParseThread(self.parser, self.prompt)
         self.parse_thread.start()
         self.listen_thread.start()
         self.listen_thread.forward_to(self.parse_thread)
@@ -621,7 +604,7 @@ class Console(Cmd):
         return self.complete_from_list(['mmwave', 'listen', 'plot'], text, line)
 
     @argcheck()
-    @if_thread_running('listen')
+    @ensure_thread_running('listen')
     def do_print(self, args=''):
         '''
         Pretty print
@@ -641,9 +624,10 @@ class Console(Cmd):
         # Wait for user termination
         self.console_queue.get()
         self.print_thread.stop()
+        print()
 
     @argcheck()
-    @if_thread_running('listen')
+    @ensure_thread_running('listen')
     def do_plot(self, args=''):
         '''
         Start plotter
@@ -664,7 +648,7 @@ class Console(Cmd):
         self.parse_thread.forward_to(self.plot_thread)
 
     @argcheck()
-    @if_thread_running('listen')
+    @ensure_thread_running('listen')
     def do_predict(self, args=''):
         '''
         Start prediction
@@ -688,47 +672,22 @@ class Console(Cmd):
         # Wait for user termination
         self.console_queue.get()
         self.predict_thread.stop()
-
-    @argcheck()
-    def do_start(self, args=''):
-        '''
-        Start listener, plotter and prediction.
-
-        If mmWave is not configured, default configuration will be send
-        first. Use <Ctrl-C> to stop this command.
-
-        Usage:
-        >> start
-        '''
-
-        self.do_stop()
-        self.do_configure()
-        self.do_listen()
-        self.do_plot()
-        self.do_predict()
+        print()
 
     @argcheck()
     def do_train(self, args=''):
         '''
-        Train neural network with data
+        Retrain neural network with data from `data_dir`. Use `set_data_dir`
+        to specify for custom data directory.
 
         Usage:
         >> train
         '''
 
-        paths, y = Logger.get_paths(dir=self.data_dir)
-        train_paths, test_paths, y_train, y_test = train_test_split(paths, y,
-                                                                    stratify=y,
-                                                                    test_size=.3,
-                                                                    random_state=12)
+        if not self.model.loaded():
+            self.model.load()
 
-        val_paths, test_paths, y_val, y_test = train_test_split(test_paths, y_test,
-                                                                stratify=y_test,
-                                                                test_size=.5,
-                                                                random_state=12)
-
-        self.model.load('preprocessor')
-        self.model.train(train_paths, y_train, validation_data=(val_paths, y_val))
+        train_evaluate_model(self.model, dir=self.data_dir)
 
     @argcheck()
     def do_eval(self, args=''):
@@ -768,15 +727,14 @@ class Console(Cmd):
         return gesture
 
     @argcheck(max=1)
-    @if_thread_running('listen')
+    @ensure_thread_running('listen')
     def do_log(self, args=''):
         '''
         Log data
 
         Logging specified gesture. Data will be saved in
         \'mmwave/data/<gesture>/sample_<num>.npy\' file.
-        Possible options: \'up\', \'down\', \'left\', \'right\', \'cw\',
-                          \'ccw\'
+        Possible options: \'up\', \'down\', \'left\', \'right\', \'cw\', \'ccw\'
 
         Usage:
         >> log up
@@ -796,6 +754,7 @@ class Console(Cmd):
         self.log_thread = LogThread(self.logger, gesture)
         self.log_thread.start()
         self.parse_thread.forward_to(self.log_thread)
+        self.log_thread.join()
 
     def complete_gestures(self, text, line):
         completions = [gesture.name.lower() for gesture in GESTURE]
@@ -823,14 +782,14 @@ class Console(Cmd):
         if gesture is None:
             return
 
-        warning(f'Removing geture: {args}')
+        warning(f'Removing geture: {gesture.name}')
         self.logger.discard_last_sample(gesture)
 
     def complete_remove(self, text, line, begidx, endidx):
         return self.complete_gestures(text, line)
 
     @argcheck(max=1)
-    @if_thread_running('plot')
+    @ensure_thread_running('plot')
     def do_redraw(self, args=''):
         '''
         Redraw sample
@@ -849,12 +808,13 @@ class Console(Cmd):
         if gesture is None:
             return
 
+        warning(f'Redrawing geture: {gesture.name}')
         last_file = gesture.last_file()
         if last_file is None:
             print(f'{Fore.YELLOW}No samples for gesture {gesture.name}.')
             return
 
-        last_sample = DataLoader(last_file).load()
+        last_sample = self.loader.load(last_file)
         self.plot_thread.send_to_main(self.plotter.plot_sample, last_sample)
 
     def complete_redraw(self, text, line, begidx, endidx):

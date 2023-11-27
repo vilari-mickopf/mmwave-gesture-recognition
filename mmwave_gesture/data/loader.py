@@ -19,25 +19,27 @@ class DataLoaderMeta(type):
 
 
 class DataLoader(metaclass=DataLoaderMeta):
-    def __init__(self, path):
-        self.path = path
-        self.extension = Path(path).suffix.lstrip('.')
+    def load(self, path):
+        extension = Path(path).suffix.lstrip('.')
 
-    def load(self):
-        loader = self._loaders.get(self.extension)
+        loader = self._loaders.get(extension)
         if loader is None:
             extensions = ', '.join(self._loaders.keys())
-            raise ValueError(f'Unsupported file extension: "{self.extension}". '
+            raise ValueError(f'Unsupported file extension: "{extension}". '
                              f'Suported extensions: {extensions}.')
-        return loader(self)
+        return loader(path)
+
+    @staticmethod
+    def get_extensions():
+        return list(DataLoader()._loaders.keys())
 
 
 @DataLoader.register(['npy', 'npz'])
-def _(self):
-    return np.load(self.path, allow_pickle=True)['data']
+def _(path):
+    return np.load(path, allow_pickle=True)['data']
 
 
 # Add custom loaders here:
 #  @DataLoader.register('csv')
-#  def _(self):
-#      return pd.read_csv(self.path)
+#  def _(path):
+#      return pd.read_csv(path)

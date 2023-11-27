@@ -7,7 +7,7 @@ import pprint
 import numpy as np
 import pandas as pd
 
-from mmwave_gesture.utils.prints import print, warning, error
+from mmwave_gesture.utils.thread_safe_print import print, warning, error
 
 import colorama
 from colorama import Fore
@@ -39,7 +39,7 @@ class Parser:
 
             self.sync_time = time.perf_counter()
             if not self.sync:
-                print(f'{Fore.GREEN}Sync received!\n')
+                print(f'{Fore.GREEN}Sync received!')
                 self.sync = True
                 return None
             return frames
