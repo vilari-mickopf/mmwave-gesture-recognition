@@ -153,6 +153,11 @@ class Console(Cmd):
                     else:
                         error(f'{name} thread doesn\'t exist. Skipping.')
                         return
+
+                if not self.check_thread(name):
+                    error(f'Can\'t spawn thread {name}.')
+                    return
+
                 return func(self, *args, **kwargs)
             return wrapper
         return decorator
