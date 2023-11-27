@@ -31,7 +31,7 @@ _unzip and curl are used by the [fetch](./fetch) script._
 Install [mmwave_gesture](./mmwave_gesture/) package locally:
 
 ```bash
-git clone git@github.com:vilari-mickopf/mmwave-gesture-recognition.git
+git clone https://github.com/vilari-mickopf/mmwave-gesture-recognition.git
 cd mmwave-gesture-recognition
 pip install -e .
 ```
@@ -182,7 +182,7 @@ or
 python mmwave_gesture/model.py
 ```
 
-_Note: Default data dir is [mmwave_gesture/data](mmwave_gesture/data).
+_Note: Default data dir is [mmwave_gesture/data](mmwave_gesture/data)._
 
 ### Selecting model
 By default, conv2d model is used. Other models can be selected using _set_model_ option.
