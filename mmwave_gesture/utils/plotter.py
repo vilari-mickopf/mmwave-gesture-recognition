@@ -137,5 +137,5 @@ if __name__ == '__main__':
     plotter = Plotter()
     plotter.init()
     plotter.show()
-    plotter.plot_sample(DataLoader(last_file).load())
+    plotter.plot_sample(DataLoader().load(last_file))
     plotter.close()
