@@ -31,7 +31,7 @@ _unzip and curl are used by the [fetch](./fetch) script._
 Install [mmwave_gesture](./mmwave_gesture/) package locally:
 
 ```bash
-git clone https://gitlab.com/vilari-mickopf/mmwave-gesture-recognition.git
+git clone git@github.com:vilari-mickopf/mmwave-gesture-recognition.git
 cd mmwave-gesture-recognition
 pip install -e .
 ```
