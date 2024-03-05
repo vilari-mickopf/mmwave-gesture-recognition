@@ -2,7 +2,9 @@
 
 import re
 import time
-import termios
+import platform
+if platform.system() != 'Windows':
+    import termios
 
 import serial
 import serial.tools.list_ports
@@ -77,8 +79,9 @@ class Connection:
                       f'{Fore.RED}Check your connection and permissions')
                 self.print_available_ports()
                 self.port = None
-            except termios.error:
-                pass
+            except Exception as e:
+                if platform.system() != 'Windows' and isinstance(e, termios.error):
+                    pass
 
         return wrapper
 
