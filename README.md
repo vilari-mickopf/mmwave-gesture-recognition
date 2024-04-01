@@ -204,14 +204,15 @@ python mmwave-console.py
 >> help listen
 ```
 
+## Acknowledgments
+
+* Thanks to [NOVELIC](https://www.novelic.com/) for providing me with sensors
+
 ## Authors
 
 * **Filip Markovic**
 
-## License
+------
 
-This project is licensed under the MIT License - see the [LICENSE](./LICENSE) file for details
-
-## Acknowledgments
-
-* Thanks to [NOVELIC](https://www.novelic.com/) for providing me with sensors
+<a href="https://opensource.org/licenses/MIT" rel="nofollow"><img src="https://camo.githubusercontent.com/a4426cbe5c21edb002526331c7a8fbfa089e84a550567b02a0d829a98b136ad0/68747470733a2f2f696d672e736869656c64732e696f2f62616467652f4c6963656e73652d4d49542d79656c6c6f772e737667" alt="License: MIT" data-canonical-src="https://img.shields.io/badge/License-MIT-yellow.svg" height="25px"></a>
+<a href="https://www.buymeacoffee.com/vilari.mickopf"><img src="https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png" height="25px"></a>
