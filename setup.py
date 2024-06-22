@@ -24,4 +24,4 @@ setup(name='mmwave-gesture',
                         'matplotlib',
                         'seaborn',
                         'scikit-learn',
-                        'tensorflow'])
+                        'tensorflow==2.15'])

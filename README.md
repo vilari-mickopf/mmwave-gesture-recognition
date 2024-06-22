@@ -43,6 +43,8 @@ You can run [./fetch](./fetch) script to download and extract:
 
 - [models](https://www.dropbox.com/scl/fi/ni8ioomcqzjvocfj9gx1j/models.zip?rlkey=pf0g7tpi20zn3idowptw9y9fe&dl=0) (Conv1D, Conv2D, ResNet1D, ResNet2D, LSTM and Transformer models) ~320Mb
 
+_**Note**: Models are generated using TensorFlow 2.15, which is why the tf version is fixed in the [setup.py](https://github.com/vilari-mickopf/mmwave-gesture-recognition/blob/master/setup.py#L27). All models, except for ResNets, can be loaded with tf versions from 2.12 to 2.15. However, the training process should work fine with all tf versions up to 2.15, as tf introduced some changes in version 2.16 that break nested models._
+
 To access the required data manually, follow the provided links to download the files.
 Once downloaded, manually extract the contents to the directories [mmwave_gesture/data/](mmwave_gesture/data/) and [mmwave_gesture/models/](mmwave_gesture/models/) as appropriate.
 
